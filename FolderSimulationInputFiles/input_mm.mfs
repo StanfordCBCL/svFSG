@@ -88,7 +88,7 @@ Add equation: FSI {
       #Elasticity modulus: 1e6
       #Poisson ratio: 0.4
       Dilational penalty model: M94
-      Penalty parameter: 1e7
+      Penalty parameter: 1e8
       Density: 0.0
       Mass damping: 1e6
    }

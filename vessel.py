@@ -1,4 +1,5 @@
 from utils import *
+import time
 
 # This class provides functionality to running an FSG simulation
 class Vessel():
@@ -66,19 +67,72 @@ class Vessel():
         return
 
     def runFluidSolidIteration(self):
+        time1 = time.time()
         self.updateSolid()
+        time2 = time.time()
+        print("Time to updateSolid: " + str(time2 - time1))
+        time1 = time.time()
+
         self.saveSolid()
+        time2 = time.time()
+        print("Time to saveSolid: " + str(time2 - time1))
+        time1 = time.time()
+
         self.updateFluid()
+        time2 = time.time()
+        print("Time to updateFluid: " + str(time2 - time1))
+        time1 = time.time()
+
         self.appendFluidResult()
+        time2 = time.time()
+        print("Time to appendFluidResult: " + str(time2 - time1))
+        time1 = time.time()
+
         self.saveFluid()
+        time2 = time.time()
+        print("Time to saveFluid: " + str(time2 - time1))
+        time1 = time.time()
+
         self.runFluidSolid()
+        time2 = time.time()
+        print("Time to runFluidSolid: " + str(time2 - time1))
+        time1 = time.time()
+
         self.updateFluidSolidResults()
+        time2 = time.time()
+        print("Time to updateFluidSolidResults: " + str(time2 - time1))
+        time1 = time.time()
+
         self.appendSolidResult()
+        time2 = time.time()
+        print("Time to appendSolidResult: " + str(time2 - time1))
+        time1 = time.time()
+
         self.appendIterfaceResult()
+        time2 = time.time()
+        print("Time to appendIterfaceResult: " + str(time2 - time1))
+        time1 = time.time()
+
         self.updateMaterial()
+        time2 = time.time()
+        print("Time to updateMaterial: " + str(time2 - time1))
+        time1 = time.time()
+
         self.updateReference()
+        time2 = time.time()
+        print("Time to updateReference: " + str(time2 - time1))
+        time1 = time.time()
+
         self.saveReference()
+        time2 = time.time()
+        print("Time to saveReference: " + str(time2 - time1))
+        time1 = time.time()
+
         self.checkResidual()
+        time2 = time.time()
+        print("Time to checkResidual: " + str(time2 - time1))
+        time1 = time.time()
+
         return
 
     def runSolidIteration(self):
@@ -171,7 +225,10 @@ class Vessel():
         input_file.close()
 
         print("Running points...")
+        time1 = time.time()
         os.system("mpiexec python utils_run_vessel.py")
+        time2 = time.time()
+        print("Time to run_vessel: " + str(time2 - time1))
 
         print("Parsing points...")
         pool = Pool()
@@ -361,6 +418,8 @@ class Vessel():
         numPts = self.vesselReference.GetNumberOfPoints()
         numCells = self.vesselReference.GetNumberOfCells()
 
+        time1 = time.time()
+
         for q in range(numPts):
             originalCoordinate = np.array(self.vesselReference.GetPoint(q))
             displacement_prev = np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(q))
@@ -394,8 +453,7 @@ class Vessel():
             self.vesselReference.GetPointData().GetArray("residual_prev").SetTuple(q, rcurr)
             self.vesselReference.GetPointData().GetArray("displacements").SetTuple(q, displacement)
 
-            self.vesselReference = computeGaussValues(self.vesselReference,"displacements")
-
+        self.vesselReference = computeGaussValues(self.vesselReference,"displacements")
 
         # Get stress invariant
         for q in range(numCells):

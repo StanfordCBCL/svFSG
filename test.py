@@ -23,10 +23,13 @@ else:
     os.system('mkdir -p ' + simulation_vessel.outputDir)
     os.system('mkdir -p ' + 'meshIterations')
 
+
 startTime = time.time()
 
 while simulation_vessel.timeStep < simulation_vessel.max_days:
-    while simulation_vessel.residual > simulation_vessel.tolerance:
+    simulation_vessel.timeIter = 0
+    simulation_vessel.residual = simulation_vessel.tolerance*10.0
+    while simulation_vessel.residual > simulation_vessel.tolerance or simulation_vessel.timeIter < 3:
         simulation_vessel.runFluidSolidIteration()
         simulation_vessel.currTime = time.time() - startTime + simulation_vessel.startTime
         simulation_vessel.writeStatus(simulation_vessel.currTime)
