@@ -1,5 +1,7 @@
 import vessel
 import pickle
+import os
+import time
 
 def saveVessel(vess):
     with open('vessel.pickle', 'wb') as file:
@@ -11,20 +13,24 @@ def loadVessel():
         vess = pickle.load(file)
     return vess
 
+if os.path.exists('vessel.pickle'):
+    simulation_vessel = loadVessel()
+    simulation_vessel.startTime = simulation_vessel.currTime
+else:
+    simulation_vessel = vessel.Vessel(radius=0.857, thickness=0.07, length=0.857*2, numLen=8, numCirc=12)
+    simulation_vessel.initializeVessel()
+    simulation_vessel.runFluidIteration()
+    os.system('mkdir -p ' + simulation_vessel.outputDir)
+    os.system('mkdir -p ' + 'meshIterations')
 
-A = vessel.Vessel(numLen=4,length=1)
-A.initializeVessel()
-#A.runFluidIteration()
+startTime = time.time()
 
-# with open('vessel.pickle', 'wb') as file:
-#     pickle.dump(A,file)
-
-#with open('vessel.pickle', 'rb') as file:
-#    A = pickle.load(file)
-
-A.runFluidSolidIteration()
-#A.runFluidSolidIteration()
-
-saveVessel(A)
-
-import pdb; pdb.set_trace()
+while simulation_vessel.timeStep < simulation_vessel.max_days:
+    while simulation_vessel.residual > simulation_vessel.tolerance:
+        simulation_vessel.runFluidSolidIteration()
+        simulation_vessel.currTime = time.time() - startTime + simulation_vessel.startTime
+        simulation_vessel.writeStatus(simulation_vessel.currTime)
+        simulation_vessel.incrementIteration()
+        saveVessel(simulation_vessel)
+    simulation_vessel.incrementTimestep()
+    saveVessel(simulation_vessel)

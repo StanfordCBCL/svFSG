@@ -6,11 +6,11 @@ from ctypes import cdll
 from ctypes import c_char_p
 from ctypes import c_int
 from ctypes import c_double
+
 lib = cdll.LoadLibrary('./libgnr.so')
 run = lib.run
 run.argtypes = [c_char_p, c_char_p, c_int, c_int, c_int, c_int, c_double,c_double,c_double, c_double, c_double, c_double,c_double,c_double,c_double,c_double,c_double,c_double,c_double,c_double]
 #run(dir_prefix.encode('ascii'), filename.encode('ascii'),restart_arg,iter_arg,gnr_arg,num_days,step_size,sigma_arg,tauw_arg,anysm_arg,tevg_arg,F0, F1, F2, F3, F4,F5, F6, F7, F8)
-
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size() # new: gives number of ranks in comm

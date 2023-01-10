@@ -31,7 +31,6 @@ class Vessel():
         self.simulationInputDirectory = kwargs.get("simulationInputDirectory", "FolderSimulationInputFiles")
         self.simulationExecutable = kwargs.get("simulationExecutable","~/svFSI-build/svFSI-build/mysvfsi")
         self.vesselName = kwargs.get("vesselName", "vessel")
-        self.simulationType = kwargs.get("simulationType", "mm")
         self.resultNum = kwargs.get("resultNum",1000)
         self.resultDir = kwargs.get("resultDir","results")
         self.fluidDir = kwargs.get("fluidDir","fluid-results")
@@ -39,25 +38,32 @@ class Vessel():
         self.estimateFluids = kwargs.get("estimateFluids", True)
         self.predictMethod = kwargs.get("predictMethod", "aitken")
         self.gnr_step_size = kwargs.get("gnrStepSize", 1.0)
-    
+        self.startTime = 0.0
+        self.currTime = 0.0
+        self.tolerance = kwargs.get("tolerance", 1e-3)
 
-    def incrementTimestep():
+    def writeStatus(self, currTime):
+        with open('svDriverIterations','a') as f:
+            print("%d %d %.3e %5.4f %5.2f" %(self.timeStep,self.timeIter,self.residual,self.omega, currTime), file=f)
+
+    def setTime(self, timeVal):
+        self.time = timeVal
+        return
+
+    def incrementTimestep(self):
         self.timeStep+=1
         return
 
-    def incrementIteration():
+    def incrementIteration(self):
         self.timeIter+=1
         return
-
 
     def runFluidIteration(self):
         self.updateFluid()
         self.saveFluid()
         self.runFluid()
         self.updateFluidResults()
-
         return
-
 
     def runFluidSolidIteration(self):
         self.updateSolid()
@@ -71,13 +77,9 @@ class Vessel():
         self.appendIterfaceResult()
         self.updateMaterial()
         self.updateReference()
-
-        self.timeIter+=1
-        if checkTol:
-            self.timeStep+=1
-
+        self.saveReference()
+        self.checkResidual()
         return
-
 
     def runSolidIteration(self):
         self.updateSolid()
@@ -86,27 +88,38 @@ class Vessel():
         self.updateSolidResults()
         self.updateMaterial()
         self.updateReference()
-
-        self.timeIter+=1
-        if checkTol:
-            self.timeStep+=1
-            
+        self.saveReference()
+        self.checkResidual()
         return
 
-    def checkTol(self):
+    def checkResidual(self):
+        tol1 = np.max(self.vesselReference.get_array('residual_curr'))
+        tol2 = np.max(abs(self.vesselReference.get_array('inv_prev')/self.vesselReference.get_array('inv_curr') - 1.0))
+        tol3 = np.max(abs(self.vesselReference.get_array('wss_prev')/self.vesselReference.get_array('wss_curr') - 1.0))
+        self.residual = np.max([tol1,tol2,tol3])
         return
-
 
     def runSolid(self):
-        os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_"+self.simulationType+".mfs")
+        if self.timeIter == 0 and self.timeStep == 0:
+            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_mm.mfs")
+        else:
+            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")
+        print("Solid simulation finished.")
+
         return
 
     def runFluid(self):
         os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_fluid.mfs")
+        print("Fluid simulation finished.")
         return
 
     def runFluidSolid(self):
-        os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_"+self.simulationType+".mfs")
+        if self.timeIter == 0 and self.timeStep == 0:
+            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_mm.mfs")
+        else:
+            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_aniso.mfs")
+        print("FSI simulation finished.")
+
         return
 
     def initializeVessel(self):
@@ -118,8 +131,6 @@ class Vessel():
         return
 
     def updateMaterial(self):
-
-
         numCells = self.vesselReference.GetNumberOfCells()
         input_array = []
 
@@ -135,7 +146,6 @@ class Vessel():
             e_t = self.vesselReference.GetCellData().GetArray('e_t').GetTuple(q)
             e_z = self.vesselReference.GetCellData().GetArray('e_z').GetTuple(q)
             Q = np.array((e_r,e_t,e_z))
-
 
             defGrad_mem = []
             #Gauss point values
@@ -249,11 +259,11 @@ class Vessel():
 
         return
 
-    def saveReference(self, saveIter=False):
+    def saveReference(self, saveIter=True):
         if saveIter:
-            save_data(self.prefix + 'meshIterations/mesh_' + str(self.timeStep) + '_' + str(self.timeIter) + '.vtu', exist_ok=True)
+            save_data(self.prefix + 'meshIterations/mesh_' + str(self.timeStep) + '_' + str(self.timeIter) + '.vtu', self.vesselReference)
         else:
-            save_data(self.prefix + 'meshResults/mesh_' + str(self.timeStep) + '.vtu', exist_ok=True)
+            save_data(self.prefix + 'meshResults/mesh_' + str(self.timeStep) + '.vtu', self.vesselReference)
         return
 
 
@@ -363,21 +373,23 @@ class Vessel():
             displacement_curr = solidCoordinate + solidDispacement - originalCoordinate
 
             residual_curr = displacement_curr - displacement_prev
+
             self.vesselReference.GetPointData().GetArray("residual_curr").SetTuple(q, residual_curr)
 
         if self.predictMethod == "none":
             self.omega = 1.0
         elif self.predictMethod == "aitken":
-            rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
-            rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
-            diff = rcurr - rprev
-            self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
+            if self.timeIter > 1:
+                rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
+                rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
+                diff = rcurr - rprev
+                self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
 
         # Calculate cauchy green tensor
         for q in range(numPts):
             rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr").GetTuple3(q))
             dcurr = np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(q))
-            displacement = dcurr + self.omega *rcurr
+            displacement = dcurr + self.omega*rcurr
 
             self.vesselReference.GetPointData().GetArray("residual_prev").SetTuple(q, rcurr)
             self.vesselReference.GetPointData().GetArray("displacements").SetTuple(q, displacement)
@@ -389,17 +401,29 @@ class Vessel():
         for q in range(numCells):
             cell = self.solidResult.GetCell(q)
             cellPts = cell.GetPointIds()
+
+            # Elementwise values
+            fluidStressId = int(self.vesselReference.GetCellData().GetArray('fluidStressQueryID').GetTuple1(q))
+            solidStressId = int(self.vesselReference.GetCellData().GetArray('solidStressQueryID').GetTuple1(q))
+
+            sigma_inv = 0.0
             # For each cell, use trapezoidal integration to compute sigma
-            cellSigma = 0.0
-            for r in range(cellPts.GetNumberOfIds()):
-                ptId = cellPts.GetId(r)
-                pointSigma = self.solidResult.GetPointData().GetArray('Cauchy_stress').GetTuple6(ptId)           
-                cellSigma += (pointSigma[0]+pointSigma[1]+pointSigma[2])
-            cellSigma *= 1/float(cellPts.GetNumberOfIds())
+            for p in range(fluidStressId, solidStressId):
+                cell = self.solidResult.GetCell(p)
+                cellPts = cell.GetPointIds()
+                cellSigma = 0.0
+                for r in range(cellPts.GetNumberOfIds()):
+                    ptId = cellPts.GetId(r)
+                    pointSigma = self.solidResult.GetPointData().GetArray('Cauchy_stress').GetTuple6(ptId)           
+                    cellSigma += (pointSigma[0]+pointSigma[1]+pointSigma[2])
+                cellSigma *= 1/float(cellPts.GetNumberOfIds())
+                sigma_inv = sigma_inv + cellSigma
+
+            sigma_inv = 0.1*sigma_inv/(solidStressId-fluidStressId)
 
             inv_prev = self.vesselReference.GetCellData().GetArray("inv_curr").GetTuple1(q)
             self.vesselReference.GetCellData().GetArray("inv_prev").SetTuple1(q, inv_prev)
-            self.vesselReference.GetCellData().GetArray("inv_curr").SetTuple1(q, cellSigma)
+            self.vesselReference.GetCellData().GetArray("inv_curr").SetTuple1(q, sigma_inv)
 
         return
 

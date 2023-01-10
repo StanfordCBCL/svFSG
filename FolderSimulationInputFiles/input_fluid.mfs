@@ -11,7 +11,7 @@ Save results to VTK format: 1
 Name prefix of saved VTK files: result
 Increment in saving VTK files: 100
 Start saving after time step: 1
-Save results in folder: fluid-result
+Save results in folder: results
 
 Increment in saving restart files: 1000
 Convert BIN to VTK format: 0
