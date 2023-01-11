@@ -54,7 +54,7 @@ Add equation: struct {
    Dilational penalty model: M94
    Penalty parameter: 1e7
    Density: 0.0
-   Mass damping: 1e6
+   Mass damping: 1e4
 
    LS type: BICGS {
       Preconditioner: Trilinos-diagonal
@@ -65,6 +65,7 @@ Add equation: struct {
    
    Output: Spatial {
       Displacement: t
+      Velocity: t
       Jacobian: t
       Stress: t
       Strain: t
@@ -90,12 +91,8 @@ Add equation: struct {
 
    Add BC: wall_inner {
       Type: Neu
-      Time dependence: Steady
-      Value: 6150.0
-      #Time dependence: Unsteady
-      #Temporal values file path: load.dat
-      #Ramp function: t
-      #Follower pressure load: t
+      Time dependence: Spatial
+      Spatial values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_inner.vtp
    }
  
 }

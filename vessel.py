@@ -29,6 +29,7 @@ class Vessel():
         self.timeIter = 0
         self.omega = 0.1
         self.residual = 1.0
+        self.viscosity = kwargs.get("viscosity", 0.04)
         self.simulationInputDirectory = kwargs.get("simulationInputDirectory", "FolderSimulationInputFiles")
         self.simulationExecutable = kwargs.get("simulationExecutable","~/svFSI-build/svFSI-build/mysvfsi")
         self.vesselName = kwargs.get("vesselName", "vessel")
@@ -36,12 +37,12 @@ class Vessel():
         self.resultDir = kwargs.get("resultDir","results")
         self.fluidDir = kwargs.get("fluidDir","fluid-results")
         self.outputDir = kwargs.get("outputDir","Outputs")
-        self.estimateFluids = kwargs.get("estimateFluids", True)
+        self.estimateWSS = kwargs.get("estimateWSS", False)
         self.predictMethod = kwargs.get("predictMethod", "aitken")
         self.gnr_step_size = kwargs.get("gnrStepSize", 1.0)
         self.startTime = 0.0
         self.currTime = 0.0
-        self.tolerance = kwargs.get("tolerance", 1e-3)
+        self.tolerance = kwargs.get("tolerance", 1e-4)
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -60,79 +61,29 @@ class Vessel():
         return
 
     def runFluidIteration(self):
+        self.updateSolid()
+        self.saveSolid()
         self.updateFluid()
         self.saveFluid()
         self.runFluid()
         self.updateFluidResults()
+        self.appendIterfaceResult()
         return
 
     def runFluidSolidIteration(self):
-        time1 = time.time()
         self.updateSolid()
-        time2 = time.time()
-        print("Time to updateSolid: " + str(time2 - time1))
-        time1 = time.time()
-
         self.saveSolid()
-        time2 = time.time()
-        print("Time to saveSolid: " + str(time2 - time1))
-        time1 = time.time()
-
         self.updateFluid()
-        time2 = time.time()
-        print("Time to updateFluid: " + str(time2 - time1))
-        time1 = time.time()
-
         self.appendFluidResult()
-        time2 = time.time()
-        print("Time to appendFluidResult: " + str(time2 - time1))
-        time1 = time.time()
-
         self.saveFluid()
-        time2 = time.time()
-        print("Time to saveFluid: " + str(time2 - time1))
-        time1 = time.time()
-
         self.runFluidSolid()
-        time2 = time.time()
-        print("Time to runFluidSolid: " + str(time2 - time1))
-        time1 = time.time()
-
         self.updateFluidSolidResults()
-        time2 = time.time()
-        print("Time to updateFluidSolidResults: " + str(time2 - time1))
-        time1 = time.time()
-
         self.appendSolidResult()
-        time2 = time.time()
-        print("Time to appendSolidResult: " + str(time2 - time1))
-        time1 = time.time()
-
         self.appendIterfaceResult()
-        time2 = time.time()
-        print("Time to appendIterfaceResult: " + str(time2 - time1))
-        time1 = time.time()
-
         self.updateMaterial()
-        time2 = time.time()
-        print("Time to updateMaterial: " + str(time2 - time1))
-        time1 = time.time()
-
         self.updateReference()
-        time2 = time.time()
-        print("Time to updateReference: " + str(time2 - time1))
-        time1 = time.time()
-
         self.saveReference()
-        time2 = time.time()
-        print("Time to saveReference: " + str(time2 - time1))
-        time1 = time.time()
-
         self.checkResidual()
-        time2 = time.time()
-        print("Time to checkResidual: " + str(time2 - time1))
-        time1 = time.time()
-
         return
 
     def runSolidIteration(self):
@@ -140,6 +91,7 @@ class Vessel():
         self.saveSolid()
         self.runSolid()
         self.updateSolidResults()
+        self.appendSolidResult()
         self.updateMaterial()
         self.updateReference()
         self.saveReference()
@@ -271,7 +223,12 @@ class Vessel():
     def updateFluid(self):
         surf = self.vesselSolid.extract_surface()
         inner = thresholdModel(surf, 'InnerRegionID',0.5,1.5)
-        self.vesselFluid = self.generateFluidMesh(inner)
+        if self.fluidResult is not None:
+            tempFluid = self.generateFluidMesh(inner)
+            self.vesselFluid = interpolateSolution(self.fluidResult, tempFluid)
+        else:
+            self.vesselFluid = self.generateFluidMesh(inner)
+
 
     def saveSolid(self):
         vol = self.vesselSolid
@@ -443,6 +400,8 @@ class Vessel():
                 rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
+            else:
+                self.omega = 1.0
 
         # Calculate cauchy green tensor
         for q in range(numPts):
@@ -844,6 +803,10 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array((inIds).astype(int),name="ProximalRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((outIds).astype(int),name="DistalRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((wallIds).astype(int),name="OuterRegionID"))
+
+        numPts = vol.GetNumberOfPoints()
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="Velocity"))
+        vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
 
         return vol
 

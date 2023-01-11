@@ -189,138 +189,6 @@ def clean(data, tolerance=None):
     return output
 
 
-
-def generateFluidMesh(surf,numRad,numCirc,numLen):
-    print("Making inner volume...")
-    pid = 0
-    numQuad = numCirc // 4 + 1
-    numPerim = numCirc // 4
-    quadFrac = 0.1
-    numTrans = 40
-    points = []
-
-    inIds = np.zeros((numQuad**2 + (numTrans-1)*numCirc)*(numLen+1))
-    outIds = np.zeros((numQuad**2 + (numTrans-1)*numCirc)*(numLen+1))
-    wallIds = np.zeros((numQuad**2 + (numTrans-1)*numCirc)*(numLen+1))
-
-    outIds[0:numQuad**2] = 1
-    outIds[((numLen+1)*numQuad**2):((numLen+1)*numQuad**2)+ (numTrans-1)*numCirc] = 1
-
-    inIds[((numLen+1)-1)*numQuad**2:(numLen+1)*numQuad**2] = 1
-    inIds[-(numTrans-1)*numCirc:] = 1
-
-    for ia in range(numLen+1):
-        wallIds[((numLen+1)*numQuad**2) + (numTrans-2)*numCirc + ia*(numTrans-1)*(numCirc):((numLen+1)*numQuad**2) + (numTrans-1)*numCirc + ia*(numTrans-1)*(numCirc)] = 1
-
-
-    numPoints = surf.GetNumberOfPoints()
-    origIdsDict = dict(zip((surf.get_array('StructureID')-1).tolist(),range(numPoints)))
-
-    # generate quadratic mesh
-    for ia in range((numLen+1)):
-        c1 = np.array(surf.GetPoint(origIdsDict[(ia*(numRad+1)*numCirc) + (numRad+1)*0*(numCirc // 4)]))
-        c2 = np.array(surf.GetPoint(origIdsDict[(ia*(numRad+1)*numCirc) + (numRad+1)*1*(numCirc // 4)]))
-        c3 = np.array(surf.GetPoint(origIdsDict[(ia*(numRad+1)*numCirc) + (numRad+1)*2*(numCirc // 4)]))
-        c4 = np.array(surf.GetPoint(origIdsDict[(ia*(numRad+1)*numCirc) + (numRad+1)*3*(numCirc // 4)]))
-        center = (c1 + c2 + c3 + c4)/4.0
-
-        M = np.linalg.lstsq(np.array([[-0.5,-0.5,0,1],[0.5,-0.5,0,1],[0.5,0.5,0,1],[-0.5,0.5,0,1]]),np.vstack((c1,c2,c3,c4)))[0]
-        for iy in range(numQuad):
-            for ix in range(numQuad):
-
-                rady = quadFrac * ( iy / (numQuad - 1) - 0.5)
-                radx = quadFrac * ( ix / (numQuad - 1) - 0.5)
-
-                points.append(np.matmul([radx, rady, 0,1],M))
-                pid += 1
-
-    # generate transition mesh
-    for ia in range(numLen+1):
-        for ir in range(1, numTrans):
-            for ic in range(numCirc):
-                if ic <= numPerim:
-                    quadPoint = points[ic + ia*(numQuad**2)]
-                elif numPerim < ic <= numPerim*2:
-                    quadPoint = points[(ic-numPerim + 1)*numQuad - 1 + ia*(numQuad**2)]
-                elif numPerim*2 < ic <= numPerim*3:
-                    quadPoint = points[numQuad**2 - 1 - (ic-numPerim*2) + ia*(numQuad**2)]
-                elif numPerim*3 < ic <= numPerim*4:
-                    quadPoint = points[(numPerim-(ic-numPerim*3))*numQuad  + ia*(numQuad**2)]
-
-                outerPoint = surf.GetPoint(origIdsDict[(ia*(numRad+1)*numCirc) + ic*(numRad+1)])
-
-                points.append(((outerPoint - quadPoint) * ir/(numTrans - 1)) + quadPoint)
-                pid += 1
-
-
-    coords=[[0, 1, 0],
-            [0, 1, 1],
-            [1, 1, 1],
-            [1, 1, 0],
-            [0, 0, 0],
-            [0, 0, 1],
-            [1, 0, 1],
-            [1, 0, 0]]
-
-    cid = 0
-    cells = []
-
-    # generate quadratic mesh
-    for ia in range(numLen):
-        for iy in range(numQuad - 1):
-            for ix in range(numQuad - 1):
-                ids = []
-                for c in coords:
-                    ids += [(iy + c[0]) * numQuad + ix + c[1] + (ia + c[2]) * numQuad ** 2]
-                cells.append(ids)
-                cid += 1
- 
-    # generate transition mesh
-    for ia in range(numLen):
-        for ic in range(numCirc):
-            ids = []
-            for c in coords:
-                    if c[1] == 1:
-                        # circular side
-                        ids += [(ic + c[0])%numCirc + (numLen+1) * numQuad ** 2 + (ia + c[2]) * (numTrans - 1) * numCirc]
-                    else:
-                        if (ic + c[0]) <= numPerim:
-                            ids += [(ic + c[0]) + (ia + c[2])*(numQuad**2)]
-                        elif numPerim < (ic + c[0]) <= numPerim*2:
-                            ids += [((ic + c[0])-numPerim + 1)*numQuad - 1 + (ia + c[2])*(numQuad**2)]
-                        elif numPerim*2 < (ic + c[0]) <= numPerim*3:
-                            ids += [numQuad**2 - 1 - ((ic + c[0])-numPerim*2) + (ia + c[2])*(numQuad**2)]
-                        elif numPerim*3 < (ic + c[0]) <= numPerim*4:
-                            ids += [(numPerim-((ic + c[0])-numPerim*3))*numQuad  + (ia + c[2])*(numQuad**2)]
-            cells.append(ids)
-            cid += 1
-
-    # generate circular mesh
-    for ia in range(numLen):
-        for ir in range(numTrans-2):
-            for ic in range(numCirc):
-                ids = []
-                for c in coords:
-                        ids += [(ic + c[0])%numCirc + (numLen+1) * numQuad ** 2 + (ia + c[2]) * (numTrans - 1) * numCirc + (ir + c[1]) * numCirc]
-                cells.append(ids)
-                cid += 1
-
-
-    # each cell is a VTK_HEXAHEDRON
-    cellArray = [ [8] + cell for cell in cells]
-    cellTypes = np.empty(np.shape(cells)[0], dtype=np.uint8)
-    cellTypes[:] = vtk.VTK_HEXAHEDRON
-    cellOffset = range(0,np.shape(cells)[0]*9,9)
-
-    vol = pv.UnstructuredGrid(np.array(cellOffset), np.array(cellArray), np.array(cellTypes), np.array(points))
-
-    vol.GetPointData().AddArray(pv.convert_array((inIds).astype(int),name="ProximalRegionID"))
-    vol.GetPointData().AddArray(pv.convert_array((outIds).astype(int),name="DistalRegionID"))
-    vol.GetPointData().AddArray(pv.convert_array((wallIds).astype(int),name="OuterRegionID"))
-
-    return vol
-
-
 def getAneurysmValue(point,radius):
     """                                                                                                                                                                                                      
     Get the value of vessel behavior based on point location and radius                                                                                                                                      
@@ -590,3 +458,23 @@ def computeGaussValues(mesh,name):
     mesh.GetCellData().AddArray(pv.convert_array(allGaussNx,name="defGrad"))
 
     return mesh
+
+def interpolateSolution(source, target):
+
+    numPoints = target.GetNumberOfPoints()
+
+    pointLocator = vtk.vtkPointLocator()
+    pointLocator.SetDataSet(source)
+    pointLocator.BuildLocator()
+
+    velocity_array = np.zeros((numPoints,3))
+    pressure_array = np.zeros((numPoints,1))
+
+    for q in range(numPoints):
+        coordinate = target.GetPoint(q)
+        pointIdSource = pointLocator.FindClosestPoint(coordinate)
+
+        target.GetPointData().GetArray('Pressure').SetTuple1(q,source.GetPointData().GetArray('Pressure').GetTuple1(pointIdSource))
+        target.GetPointData().GetArray('Velocity').SetTuple(q,source.GetPointData().GetArray('Velocity').GetTuple(pointIdSource))
+
+    return target
