@@ -70,12 +70,6 @@ Add equation: fluid {
       Traction: f
       WSS: t
    }
-   
-   #Add BC: lumen_inlet {
-   #   Type: Neu
-   #   Time dependence: Steady
-   #   Value: 6150
-   #}
 
    Add BC: lumen_inlet {
       Type: Dir

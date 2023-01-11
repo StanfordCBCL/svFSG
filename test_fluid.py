@@ -19,6 +19,9 @@ if os.path.exists('vessel.pickle'):
 else:
     simulation_vessel = vessel.Vessel(radius=0.857, thickness=0.07, length=0.857*2, numLen=8, numCirc=12)
     simulation_vessel.simulationExecutable = "-np 24 ~/svFSI-build/svFSI-build/mysvfsi"
+    simulation_vessel.inletFlow = -30
+    simulation_vessel.outletResistance = 400
+"""
     simulation_vessel.initializeVessel()
     simulation_vessel.runFluidIteration()
     os.system('mkdir -p ' + simulation_vessel.outputDir)
@@ -40,3 +43,4 @@ while simulation_vessel.timeStep < simulation_vessel.max_days:
         saveVessel(simulation_vessel)
     simulation_vessel.incrementTimestep()
     saveVessel(simulation_vessel)
+"""
