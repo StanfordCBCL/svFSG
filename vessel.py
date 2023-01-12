@@ -28,6 +28,8 @@ class Vessel():
         self.timeStep = 0
         self.timeIter = 0
         self.omega = 0.1
+        self.inletFlow = kwargs.get("inletFlow", -20)
+        self.outletPressure = kwargs.get("outletPressure", 6150)
         self.residual = 1.0
         self.viscosity = kwargs.get("viscosity", 0.04)
         self.simulationInputDirectory = kwargs.get("simulationInputDirectory", "FolderSimulationInputFiles")
@@ -68,6 +70,10 @@ class Vessel():
         self.runFluid()
         self.updateFluidResults()
         self.appendIterfaceResult()
+        return
+
+    def estimateFluidIteration(self):
+        self.estimateIterfaceResult()
         return
 
     def runFluidSolidIteration(self):
@@ -273,10 +279,9 @@ class Vessel():
 
         return
 
-    def saveReference(self, saveIter=True):
-        if saveIter:
-            save_data(self.prefix + 'meshIterations/mesh_' + str(self.timeStep) + '_' + str(self.timeIter) + '.vtu', self.vesselReference)
-        else:
+    def saveReference(self):
+        save_data(self.prefix + 'meshIterations/mesh_' + str(self.timeStep) + '_' + str(self.timeIter) + '.vtu', self.vesselReference)
+        if self.timeIter == 0:
             save_data(self.prefix + 'meshResults/mesh_' + str(self.timeStep) + '.vtu', self.vesselReference)
         return
 
@@ -319,7 +324,8 @@ class Vessel():
             for p in range(cellPts.GetNumberOfIds()):
                 ptId = cellPts.GetId(p)
                 if self.vesselReference.GetPointData().GetArray('InnerRegionID').GetTuple1(ptId) == 1:
-                    fluidId = int(pointLocatorFluid.FindClosestPoint(self.vesselReference.GetPoint(ptId)))
+                    fluidCoordinate = np.array(self.vesselReference.GetPoint(ptId)) + np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(ptId))
+                    fluidId = int(pointLocatorFluid.FindClosestPoint(fluidCoordinate))
                     pointWSS = fluidSurface.GetPointData().GetArray('WSS').GetTuple3(fluidId)
                     pointPressure = fluidSurface.GetPointData().GetArray('Pressure').GetTuple1(fluidId)
                     self.vesselReference.GetPointData().GetArray('Pressure').SetTuple1(ptId,pointPressure)
@@ -339,29 +345,34 @@ class Vessel():
         """
         TODO
         """
-        numPts = self.vesselReference.GetNumberOfPoints()
+        numCells = self.vesselReference.GetNumberOfCells()
 
-        for q in range(numPts):
-            fluidStressId = int(volumedata.GetCellData().GetArray('fluidStressQueryID').GetTuple1(q))
-            cell = fluidSurface.GetCell(fluidStressId)
+        for q in range(numCells):
+            fluidStressId = int(self.vesselReference.GetCellData().GetArray('fluidStressQueryID').GetTuple1(q))
+            cell = self.vesselReference.GetCell(fluidStressId)
             cellPts = cell.GetPointIds()
 
             # For each cell, use trapezoidal integration to compute WSS
-            cellWSS = 0.0
+            radius = 0.0
             numberOfPoints = 0
             for p in range(cellPts.GetNumberOfIds()):
                 ptId = cellPts.GetId(p)
                 if self.vesselReference.GetPointData().GetArray('InnerRegionID').GetTuple1(ptId) == 1:
-                    fluidCoordinate =  self.vesselReference.GetPoint(ptId)
-                    pointWSS = 4*0.04*20.0/(np.pi*(np.linalg.norm(fluidCoordinate[0:2])**3.0))
-                    cellWSS += pointWSS
-                    numberOfPoints += 1
-            #Average WSS in cell
-            cellWSS *= 1/float(numberOfPoints)
 
-            wss_prev = volumedata.GetCellData().GetArray('wss_curr').GetTuple1(q)
-            volumedata.GetCellData().GetArray('wss_prev').SetTuple1(q,wss_prev)
-            volumedata.GetCellData().GetArray('wss_curr').SetTuple1(q,cellWSS)
+                    fluidCoordinate = np.array(self.vesselReference.GetPoint(ptId)) + np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(ptId))
+                    pointRadius = np.linalg.norm(fluidCoordinate[0:2])
+                    self.vesselReference.GetPointData().GetArray('Pressure').SetTuple1(ptId,self.outletPressure)
+                    radius += pointRadius
+                    numberOfPoints += 1
+
+            #Average WSS in cell
+            radius *= 1/float(numberOfPoints)
+            cellWSS = 4.0*self.viscosity*abs(self.inletFlow)/(np.pi*(radius**3.0))
+
+
+            wss_prev = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
+            self.vesselReference.GetCellData().GetArray('wss_prev').SetTuple1(q,wss_prev)
+            self.vesselReference.GetCellData().GetArray('wss_curr').SetTuple1(q,cellWSS)
 
         return
 
@@ -401,7 +412,7 @@ class Vessel():
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
-                self.omega = 1.0
+                self.omega = 0.1
 
         # Calculate cauchy green tensor
         for q in range(numPts):
@@ -463,7 +474,7 @@ class Vessel():
             pressure_array[q,:] = self.fluidResult.GetPointData().GetArray('Pressure').GetTuple1(pointIdSource)
 
         self.vesselFluid.GetPointData().AddArray(pv.convert_array(np.array(velocity_array),name="Velocity"))
-        self.vesselFluid.GetPointData().AddArray(pv.convert_array(np.array(pressure_array),name="Pressure"))
+        self.vesselFluid.GetPointData().AddArray(pv.convert_array(np.array(self.outletPressure),name="Pressure"))
 
         return
 
@@ -810,12 +821,30 @@ class Vessel():
 
         return vol
 
+    def setInputFileValues(self):
 
+        with open(self.simulationInputDirectory + '/input_aniso.mfs', 'r') as file:
+            data = file.readlines()
+        data[119] = "      Value: " + str(self.inletFlow) + "\n"
+        data[131] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
+        with open(self.simulationInputDirectory + '/input_aniso.mfs', 'w') as file:
+            file.writelines(data)
+
+        with open(self.simulationInputDirectory + '/input_mm.mfs', 'r') as file:
+            data = file.readlines()
+        data[121] = "      Value: " + str(self.inletFlow) + "\n"
+        data[133] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
+        with open(self.simulationInputDirectory + '/input_mm.mfs', 'w') as file:
+            file.writelines(data)
+
+        with open(self.simulationInputDirectory + '/input_fluid.mfs', 'r') as file:
+            data = file.readlines()
+        data[76] = "      Value: " + str(self.inletFlow) + "\n"
+        data[84] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
+        with open(self.simulationInputDirectory + '/input_fluid.mfs', 'w') as file:
+            file.writelines(data)
 
     """
-
-    def setFlow()
-
     def setPressure()
 
     def setTimestep()

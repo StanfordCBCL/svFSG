@@ -22,18 +22,19 @@ else:
     simulation_vessel.runFluidIteration()
     os.system('mkdir -p ' + simulation_vessel.outputDir)
     os.system('mkdir -p ' + 'meshIterations')
+    os.system('mkdir -p ' + 'meshResults')
 
 
 startTime = time.time()
 
 while simulation_vessel.timeStep < simulation_vessel.max_days:
-    simulation_vessel.timeIter = 0
-    simulation_vessel.residual = simulation_vessel.tolerance*10.0
     while simulation_vessel.residual > simulation_vessel.tolerance or simulation_vessel.timeIter < 3:
         simulation_vessel.runFluidSolidIteration()
         simulation_vessel.currTime = time.time() - startTime + simulation_vessel.startTime
         simulation_vessel.writeStatus(simulation_vessel.currTime)
         simulation_vessel.incrementIteration()
         saveVessel(simulation_vessel)
+    simulation_vessel.timeIter = 0
+    simulation_vessel.residual = simulation_vessel.tolerance*10.0
     simulation_vessel.incrementTimestep()
     saveVessel(simulation_vessel)
