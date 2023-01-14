@@ -16,6 +16,8 @@ class Vessel():
         self.vesselFluid = None
         self.solidResult = None
         self.fluidResult = None
+        self.sigma_h = None
+        self.tau_h = None
 
         self.nG = 8
         self.max_days = kwargs.get("gnrMaxDays", 720)
@@ -31,6 +33,7 @@ class Vessel():
         self.inletFlow = kwargs.get("inletFlow", -20)
         self.outletPressure = kwargs.get("outletPressure", 6150)
         self.residual = 1.0
+        self.residualType = None
         self.viscosity = kwargs.get("viscosity", 0.04)
         self.simulationInputDirectory = kwargs.get("simulationInputDirectory", "FolderSimulationInputFiles")
         self.simulationExecutable = kwargs.get("simulationExecutable","~/svFSI-build/svFSI-build/mysvfsi")
@@ -42,13 +45,15 @@ class Vessel():
         self.estimateWSS = kwargs.get("estimateWSS", False)
         self.predictMethod = kwargs.get("predictMethod", "aitken")
         self.gnr_step_size = kwargs.get("gnrStepSize", 1.0)
+        self.damping = kwargs.get("damping", 1e4)
+        self.penalty = kwargs.get("penalty", 1e7)
         self.startTime = 0.0
         self.currTime = 0.0
         self.tolerance = kwargs.get("tolerance", 1e-4)
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
-            print("%d %d %.3e %5.4f %5.2f" %(self.timeStep,self.timeIter,self.residual,self.omega, currTime), file=f)
+            print("%d %d %.3e %s %5.4f %5.2f" %(self.timeStep,self.timeIter,self.residual, self.residualType, self.omega, currTime), file=f)
 
     def setTime(self, timeVal):
         self.time = timeVal
@@ -105,10 +110,14 @@ class Vessel():
         return
 
     def checkResidual(self):
+        tolTypes = ["disp", "sigma_inv", "wss", "jac"]
         tol1 = np.max(self.vesselReference.get_array('residual_curr'))
-        tol2 = np.max(abs(self.vesselReference.get_array('inv_prev')/self.vesselReference.get_array('inv_curr') - 1.0))
-        tol3 = np.max(abs(self.vesselReference.get_array('wss_prev')/self.vesselReference.get_array('wss_curr') - 1.0))
-        self.residual = np.max([tol1,tol2,tol3])
+        tol2 = np.max(abs((self.vesselReference.get_array('inv_prev')-self.vesselReference.get_array('inv_curr'))/self.sigma_h))
+        tol3 = np.max(abs((self.vesselReference.get_array('wss_prev')-self.vesselReference.get_array('wss_curr'))/self.tau_h))
+        tol4 = np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0))
+        tolVals = np.array([tol1,tol2,tol3,tol4])
+        self.residual = np.max(tolVals)
+        self.residualType = tolTypes[tolVals.argmax()]
         return
 
     def runSolid(self):
@@ -137,7 +146,7 @@ class Vessel():
     def initializeVessel(self):
         if self.vesselType == "cylinder":
             self.vesselReference = self.initializeCylinder()
-            self.updateSolid()
+            self.estimateIterfaceResult()
         else:
             print("TODO: Implement segmentation initializer")
         return
@@ -534,6 +543,9 @@ class Vessel():
             for line in lines:
                 nativeIn.append([float(x) for x in line.split()])
 
+        self.sigma_h = nativeIn[13][0]
+        self.tau_h = nativeIn[13][1]
+
         #Build material array (constant for now)
         materialArray = [ nativeIn[7][0],nativeIn[4][0],nativeIn[4][1],nativeIn[4][2],nativeIn[2][0]*10.0,0,0,0,0,0,0,0,0,0,\
                           nativeIn[7][2],nativeIn[5][2],nativeIn[2][4]*10.0,nativeIn[2][5],0,0,0,0,0,0,0,0,0,0,\
@@ -825,15 +837,19 @@ class Vessel():
 
         with open(self.simulationInputDirectory + '/input_aniso.mfs', 'r') as file:
             data = file.readlines()
-        data[119] = "      Value: " + str(self.inletFlow) + "\n"
-        data[131] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
+        data[86] = "      Penalty parameter: " + str(self.penalty) + "\n"
+        data[88] = "      Mass damping: " + str(self.damping) + "\n"
+        data[118] = "      Value: " + str(self.inletFlow) + "\n"
+        data[130] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
         with open(self.simulationInputDirectory + '/input_aniso.mfs', 'w') as file:
             file.writelines(data)
 
         with open(self.simulationInputDirectory + '/input_mm.mfs', 'r') as file:
             data = file.readlines()
-        data[121] = "      Value: " + str(self.inletFlow) + "\n"
-        data[133] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
+        data[89] = "      Penalty parameter: " + str(self.penalty) + "\n"
+        data[91] = "      Mass damping: " + str(self.damping) + "\n"
+        data[120] = "      Value: " + str(self.inletFlow) + "\n"
+        data[132] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
         with open(self.simulationInputDirectory + '/input_mm.mfs', 'w') as file:
             file.writelines(data)
 
@@ -842,6 +858,20 @@ class Vessel():
         data[76] = "      Value: " + str(self.inletFlow) + "\n"
         data[84] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
         with open(self.simulationInputDirectory + '/input_fluid.mfs', 'w') as file:
+            file.writelines(data)
+
+        with open(self.simulationInputDirectory + '/solid_aniso.mfs', 'r') as file:
+            data = file.readlines()
+        data[53] = "   Penalty parameter: " + str(self.penalty) + "\n"
+        data[55] = "   Mass damping: " + str(self.damping) + "\n"
+        with open(self.simulationInputDirectory + '/solid_aniso.mfs', 'w') as file:
+            file.writelines(data)
+
+        with open(self.simulationInputDirectory + '/solid_mm.mfs', 'r') as file:
+            data = file.readlines()
+        data[54] = "   Penalty parameter: " + str(self.penalty) + "\n"
+        data[56] = "      Mass damping: " + str(self.damping) + "\n"
+        with open(self.simulationInputDirectory + '/solid_mm.mfs', 'w') as file:
             file.writelines(data)
 
     """
