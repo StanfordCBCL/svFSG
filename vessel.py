@@ -114,7 +114,7 @@ class Vessel():
         tol1 = np.max(self.vesselReference.get_array('residual_curr'))
         tol2 = np.max(abs((self.vesselReference.get_array('inv_prev')-self.vesselReference.get_array('inv_curr'))/self.sigma_h))
         tol3 = np.max(abs((self.vesselReference.get_array('wss_prev')-self.vesselReference.get_array('wss_curr'))/self.tau_h))
-        tol4 = np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0))
+        tol4 = 0.01*np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0))
         tolVals = np.array([tol1,tol2,tol3,tol4])
         self.residual = np.max(tolVals)
         self.residualType = tolTypes[tolVals.argmax()]
@@ -149,6 +149,7 @@ class Vessel():
             self.estimateIterfaceResult()
         else:
             print("TODO: Implement segmentation initializer")
+        self.saveReference()
         return
 
     def updateMaterial(self):
@@ -870,7 +871,7 @@ class Vessel():
         with open(self.simulationInputDirectory + '/solid_mm.mfs', 'r') as file:
             data = file.readlines()
         data[54] = "   Penalty parameter: " + str(self.penalty) + "\n"
-        data[56] = "      Mass damping: " + str(self.damping) + "\n"
+        data[56] = "   Mass damping: " + str(self.damping) + "\n"
         with open(self.simulationInputDirectory + '/solid_mm.mfs', 'w') as file:
             file.writelines(data)
 

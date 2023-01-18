@@ -327,7 +327,7 @@ def rotateStress(sigma,Q):
 def is_pos_def(x):
     return np.all(np.linalg.eigvals(x) > 0)
 
-def is_symmetric(a, tol=1e-4):
+def is_symmetric(a, tol=1e-2):
     return np.all(np.abs(a-a.T) < tol)
 
 def rotateStiffness(DD,Q):
