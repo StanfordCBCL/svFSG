@@ -159,6 +159,7 @@ class Vessel():
         for q in range(numCells):
             sigma_inv = self.vesselReference.GetCellData().GetArray('inv_curr').GetTuple1(q)
             wss = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
+            
             simulate = int(self.vesselReference.GetCellData().GetArray('Simulate').GetTuple1(q))
             aneurysmValue = self.vesselReference.GetCellData().GetArray('aneurysmValue').GetTuple1(q)
             tevgValue = self.vesselReference.GetCellData().GetArray('tevgValue').GetTuple1(q)
@@ -211,17 +212,21 @@ class Vessel():
         for q in range(numCells):
             stiffness_mem_g = []
             sigma_mem_g = []
-            J_di_g = []
+            J_target_g = []
+            J_curr_g = []
             for p in range(self.nG):
-                J_di, stiffness, sigma, wss, sigma_inv = output_array[q*self.nG + p]
+                J_target, J_curr, stiffness, sigma, wss, sigma_inv = output_array[q*self.nG + p]
 
                 stiffness_mem_g = stiffness_mem_g + stiffness.tolist()
                 sigma_mem_g = sigma_mem_g + sigma.tolist()
-                J_di_g = J_di_g + [J_di]
+                J_target_g = J_target_g + [J_target]
+                J_curr_g = J_curr_g + [J_curr]
+
 
             self.vesselReference.GetCellData().GetArray('stiffness_mem').SetTuple(q,stiffness_mem_g)
             self.vesselReference.GetCellData().GetArray('sigma_mem').SetTuple(q,sigma_mem_g)
-            self.vesselReference.GetCellData().GetArray('J_di').SetTuple(q,J_di_g)
+            self.vesselReference.GetCellData().GetArray('J_target').SetTuple(q,J_target_g)
+            self.vesselReference.GetCellData().GetArray('J_curr').SetTuple(q,J_curr_g)
 
         return
 
@@ -506,30 +511,43 @@ class Vessel():
             e_z = self.vesselReference.GetCellData().GetArray('e_z').GetTuple(q)
             Q = np.array((e_r,e_t,e_z))
 
+            J_curr = self.vesselReference.GetCellData().GetArray('J_curr').GetTuple(q)
+            inv_curr = self.vesselReference.GetCellData().GetArray('inv_curr').GetTuple1(q)
+
             sigma_gnr_g = []
             stiffness_g = []
             varWallProps_g = []
             p_est_g = []
 
-            inv_curr = self.vesselReference.GetCellData().GetArray('inv_curr').GetTuple1(q)
-
+            J_c = 0.0
+            p_est_c = 0.0
             for p in range(self.nG):
+                J_c += J_curr[p]/self.nG
+
                 sigma_gnr_mem = self.vesselReference.GetCellData().GetArray('sigma_mem').GetTuple(q)[p*9:(p+1)*9]
                 sigma_gnr = rotateStress(sigma_gnr_mem,Q)
                 sigma_gnr_g = sigma_gnr_g + sigma_gnr.tolist()
+
                 p_est = (10.0*inv_curr-(sigma_gnr[0]+sigma_gnr[1]+sigma_gnr[2]))/3.0
                 p_est_g = p_est_g + [p_est]
+                p_est_c += p_est/self.nG
 
-                J_di = self.vesselReference.GetCellData().GetArray('J_di').GetTuple(q)[p]
+
+            for p in range(self.nG):
+                J_target = self.vesselReference.GetCellData().GetArray('J_target').GetTuple(q)[p]
                 stiffness_mem = self.vesselReference.GetCellData().GetArray('stiffness_mem').GetTuple(q)[p*36:(p+1)*36]
                 stiffness = rotateStiffness(stiffness_mem,Q)
                 stiffness_g = stiffness_g + stiffness.tolist()
 
-                varWallProps_g = np.hstack((varWallProps_g,np.hstack((stiffness,p_est,J_di,sigma_gnr,p))))
+                varWallProps_g = np.hstack((varWallProps_g,np.hstack((stiffness,p_est_g[p],J_target/J_c,sigma_gnr_g[p*6:(p+1)*6],p))))
 
             self.vesselReference.GetCellData().GetArray('varWallProps').SetTuple(q,varWallProps_g)
             self.vesselReference.GetCellData().GetArray('p_est').SetTuple(q,p_est_g)
             self.vesselReference.GetCellData().GetArray('sigma_gnr').SetTuple(q,sigma_gnr_g)
+
+            self.vesselReference.GetCellData().GetArray('J_curr').SetTuple(q,J_curr)
+            self.vesselReference.GetCellData().GetArray('J_c').SetTuple1(q,J_c)
+            self.vesselReference.GetCellData().GetArray('p_est_c').SetTuple1(q,p_est_c)
 
         return
 
@@ -667,10 +685,11 @@ class Vessel():
         vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(6),8),(numCells,1)).astype(float),name="sigma_gnr"))
         #Scalar values
         vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_curr"))
-        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_di"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_target"))
         vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([0],8),(numCells,1)).astype(float),name="p_est"))
 
-        vol.GetCellData().AddArray(pv.convert_array(np.ones(numCells).astype(float),name="J_e"))
+        vol.GetCellData().AddArray(pv.convert_array(np.ones(numCells).astype(float),name="J_c"))
+        vol.GetCellData().AddArray(pv.convert_array(np.zeros(numCells).astype(float),name="p_est_c"))
         vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numCells).astype(float),name="wss_curr"))
         vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numCells).astype(float),name="wss_prev"))
 

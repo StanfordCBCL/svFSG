@@ -111,8 +111,8 @@ def parsePoint(inputData):
     J_curr =  np.linalg.det(np.reshape(output_HnS[-1,48:57], (3,3)))
     J_target = output_HnS[-1,46]/output_HnS[-1,47]
     # Change in volume from current to target
-    J_di = J_target/J_curr
-
+    # J_di = J_target/J_curr
+    
     stiffness = output_HnS[-1,1:37]
     sigma = output_HnS[-1,37:46]
 
@@ -123,7 +123,7 @@ def parsePoint(inputData):
     sigma_inv = output_HnS[-1,57]
     wss = output_HnS[-1,58]
     
-    return (J_di, stiffness, sigma, wss, sigma_inv)
+    return (J_target, J_curr, stiffness, sigma, wss, sigma_inv)
 
 
 def clean(data, tolerance=None):
