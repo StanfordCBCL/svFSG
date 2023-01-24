@@ -1,5 +1,4 @@
 from utils import *
-import time
 
 # This class provides functionality to running an FSG simulation
 class Vessel():
@@ -50,6 +49,16 @@ class Vessel():
         self.startTime = 0.0
         self.currTime = 0.0
         self.tolerance = kwargs.get("tolerance", 1e-4)
+        self.cvessels = None
+        self.numCells = None
+        self.pool = None
+        self.numWorkers = kwargs.get("numWorkers", multiprocessing.cpu_count())
+        self.workers = None
+        self.input_array = None
+        self.numData = None
+        self.numDataPerRank = None
+        self.numRemainder = None
+
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -149,20 +158,45 @@ class Vessel():
             self.estimateIterfaceResult()
         else:
             print("TODO: Implement segmentation initializer")
+
+        self.numCells = self.vesselReference.GetNumberOfCells()
+        self.numData = self.numCells * self.nG
+        self.numDataPerRank = self.numData//self.numWorkers
+        self.numRemainder = self.numData%self.numWorkers
+
+
+        input_array = []
+        for q in range(self.numCells):
+            aneurysmValue = self.vesselReference.GetCellData().GetArray('aneurysmValue').GetTuple1(q)
+            tevgValue = self.vesselReference.GetCellData().GetArray('tevgValue').GetTuple1(q)
+            for p in range(self.nG):
+                input_data = [self.outputDir, q*self.nG + p, self.max_days, self.gnr_step_size, aneurysmValue, tevgValue]
+                input_array.append(input_data)
+
+
+        pool_input_array = []
+        for i in range(self.numWorkers):
+            proc_input_array = input_array[self.numDataPerRank*i:self.numDataPerRank*(i+1)]
+            if i < self.numRemainder:
+                proc_input_array.append(input_array[self.numDataPerRank*self.numWorkers + i])
+            pool_input_array.append(proc_input_array)
+
+
+        time1 = time.time()
+        self.pool = multiprocessing.Pool(initializer=initializePoolWorker, initargs=(pool_input_array,),processes=self.numWorkers)
+        time2 = time.time()
+        print("Time to initialize: " + str(time2-time1))
+        self.input_array = input_array
         self.saveReference()
         return
 
     def updateMaterial(self):
-        numCells = self.vesselReference.GetNumberOfCells()
         input_array = []
+        output_array = []
 
-        for q in range(numCells):
+        for q in range(self.numCells):
             sigma_inv = self.vesselReference.GetCellData().GetArray('inv_curr').GetTuple1(q)
             wss = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
-            
-            simulate = int(self.vesselReference.GetCellData().GetArray('Simulate').GetTuple1(q))
-            aneurysmValue = self.vesselReference.GetCellData().GetArray('aneurysmValue').GetTuple1(q)
-            tevgValue = self.vesselReference.GetCellData().GetArray('tevgValue').GetTuple1(q)
 
             #Rotate into GnR membrane frame
             e_r = self.vesselReference.GetCellData().GetArray('e_r').GetTuple(q)
@@ -181,41 +215,68 @@ class Vessel():
                 defGrad_mem_g = np.reshape(defGrad_mem_g,9)
 
                 #Queue process
-                input_array.append([q, p,self.outputDir, self.timeStep,self.timeIter,simulate,self.max_days,self.gnr_step_size,sigma_inv,wss,aneurysmValue,tevgValue,\
-                                   defGrad_mem_g[0],defGrad_mem_g[1],defGrad_mem_g[2],defGrad_mem_g[3],\
-                                   defGrad_mem_g[4],defGrad_mem_g[5],defGrad_mem_g[6],defGrad_mem_g[7],defGrad_mem_g[8]])
+                input_array.append([self.timeStep,self.timeIter,sigma_inv,wss,defGrad_mem_g])
+
+                #output_data = self.cvessels[q*self.nG + p].updateVesselHandshake(self.timeStep,self.timeIter,sigma_inv,wss,defGrad_mem_g)
+                #output_array.append(output_data)
+                #print("Cell: " + str(q) + " Gauss: " + str(p))
+                #print(output_data)
 
                 defGrad_mem = np.hstack((defGrad_mem,defGrad_mem_g))
 
             self.vesselReference.GetCellData().GetArray('defGrad_mem').SetTuple(q,defGrad_mem)
 
-        input_file = open("input_array.dat","wb")
-        pickle.dump(input_array, input_file)
-        input_file.close()
+        pool_input_array = []
+        for i in range(self.numWorkers):
+            proc_input_array = input_array[self.numDataPerRank*i:self.numDataPerRank*(i+1)]
+            if i < self.numRemainder:
+                proc_input_array.append(input_array[self.numDataPerRank*self.numWorkers + i])
+            pool_input_array.append(proc_input_array)
 
-        print("Running points...")
+        map_input_array = []
+        for i in range(self.numWorkers):
+            map_input_array.append(pool_input_array)
+
+
         time1 = time.time()
-        os.system("mpiexec python utils_run_vessel.py")
+        map_output_array = self.pool.map(runPoolWorker,map_input_array)
         time2 = time.time()
-        print("Time to run_vessel: " + str(time2 - time1))
+        print("Time to run: " + str(time2-time1))
 
-        print("Parsing points...")
-        pool = Pool()
-        # Begin processing
+
+        print(map_output_array[0][0])
         output_array = []
-        for output in tqdm(pool.imap(parsePoint,input_array), total=len(input_array)):
-            output_array.append(output)
-        pool.close()
-        pool.join()
-        pool.terminate()
+        for i in range(self.numData):
+            if i < self.numDataPerRank*self.numWorkers:
+                proc_num = (i//self.numDataPerRank)
+                array_num = i%self.numDataPerRank
+            else:
+                proc_num = i%self.numDataPerRank
+                array_num = (i//self.numDataPerRank)+1
+            output_array.append(map_output_array[proc_num][array_num])
 
-        for q in range(numCells):
+
+        for q in range(self.numCells):
             stiffness_mem_g = []
             sigma_mem_g = []
             J_target_g = []
             J_curr_g = []
             for p in range(self.nG):
-                J_target, J_curr, stiffness, sigma, wss, sigma_inv = output_array[q*self.nG + p]
+                output_data = output_array[q*self.nG + p]
+                J_curr =  np.linalg.det(np.reshape(output_data[48:57], (3,3)))
+                J_target = output_data[46]/output_data[47]
+                # Change in volume from current to target
+                # J_di = J_target/J_curr
+
+                stiffness = output_data[1:37]
+                sigma = output_data[37:46]
+
+                # Dont forget units 
+                stiffness = np.array(stiffness)*10.0
+                sigma = np.array(sigma)*10.0
+
+                sigma_inv = output_data[57]
+                wss = output_data[58]
 
                 stiffness_mem_g = stiffness_mem_g + stiffness.tolist()
                 sigma_mem_g = sigma_mem_g + sigma.tolist()
@@ -228,7 +289,9 @@ class Vessel():
             self.vesselReference.GetCellData().GetArray('J_target').SetTuple(q,J_target_g)
             self.vesselReference.GetCellData().GetArray('J_curr').SetTuple(q,J_curr_g)
 
+
         return
+
 
     def updateSolid(self):
         self.vesselSolid = self.vesselReference.warp_by_vector("displacements")

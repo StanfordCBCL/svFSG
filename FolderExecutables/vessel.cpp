@@ -11,8 +11,10 @@
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_multiroots.h>
 
+
 #include "vessel.h"
 #include "functions.h"
+
 
 using std::string;
 using std::vector;
@@ -185,6 +187,110 @@ vessel::vessel() { //Default constructor
     wss_calc_flag = 0; //indicates if GnR should update its own current WSS
     app_visc_flag = 0; //indicates whether to use the empirical correction for viscosity from Secomb 2017
 
+}
+
+//Initialize the reference vessel for the simulation    
+void  vessel::initializeVesselHandshake(char* prefix_char, char* name_char, int num_days, double step_size,double anysm_arg, double tevg_arg){
+
+    string prefix_arg = string(prefix_char);
+    string name_arg = string(name_char);
+
+    //Initialize the reference vessel for the simulation
+    string native_file = "FolderVesselConfigurationFiles/Native_in_handshake_";// + name_arg;
+    string immune_file = "FolderVesselConfigurationFiles/Immune_in_";// + name_arg;
+    string scaffold_file = "FolderVesselConfigurationFiles/Scaffold_in_";// + name_arg;
+
+    //Initialize TEVG files if necessary
+    if(tevg_arg > 0.0) {
+        //Initialize TEVG
+        initializeNativeHandshake(native_file,num_days,step_size);
+        initializeTEVGHandshake(scaffold_file,immune_file,tevg_arg,num_days,step_size);
+    } else {
+        initializeNativeHandshake(native_file,num_days,step_size);
+    }
+
+    //Get all other input arguements and apply to TEVG
+    gnr_name = prefix_arg + "/" + gnr_name + "_" + name_arg;
+    exp_name = prefix_arg + "/" + exp_name + "_" + name_arg;
+    file_name = prefix_arg + "/" + file_name + "_" + name_arg;
+    hns_name = prefix_arg + "/" + hns_name + "_" + name_arg;
+
+    //------------------------------------------------------------------------
+
+    //For elastin degradation 
+    double Q_p1;
+
+    if(tevg_arg <= 0.0) {
+        for (int sn = 1; sn < nts; sn++) {
+            //Calculate elastin degradation
+            //s = sn * simulation_vessel.dt;
+            
+            Q_p1 = 1.0;
+            
+            epsilonR_alpha[0 * nts + sn] = Q_p1 * epsilonR_alpha[0 * nts + 0];
+
+            rhoR_alpha[0 * nts + sn] = epsilonR_alpha[0 * nts + sn] * 
+                                                                rho_hat_alpha_h[0];
+        }
+    }
+    if(anysm_arg > 0.0) {
+        //Change endothelial functioning to be proportional to damage
+        for (int alpha = 0; alpha < n_alpha; alpha++) {
+            K_tauw_p_alpha_h[alpha] = std::max(K_tauw_p_alpha_h[alpha] - anysm_arg, 0.0);
+        }
+        
+        c_alpha_h[0] = c_alpha_h[0]*(1.0 - anysm_arg);
+    }
+
+}
+
+
+int vessel::updateVesselHandshake(int restart_arg, int iter_arg, double sigma_arg, double tauw_arg, double * F, double * out_array) {
+
+
+    try {
+        if (sn == 0){
+            //Write initial state to file
+            update_sigma_handshake(this);
+            update_kinetics(*this);
+        }
+
+        sigma_inv = sigma_arg;
+        bar_tauw = tauw_arg;
+        F_curr[0] = F[0];
+        F_curr[1] = F[1];
+        F_curr[2] = F[2];
+        F_curr[3] = F[3];
+        F_curr[4] = F[4];
+        F_curr[5] = F[5];
+        F_curr[6] = F[6];
+        F_curr[7] = F[7];
+        F_curr[8] = F[8];
+
+        update_time_step_handshake(*this, iter_arg);
+
+        out_array[0] = s;   
+        for (int i = 0; i < 36; i++) {
+            out_array[i+1] = CC[i];
+        }
+        for (int i = 0; i < 9; i++){
+            out_array[i+37] = sigma[i];
+        }
+        out_array[46] = rhoR[sn];
+        out_array[47] = rho[sn];
+        for (int i = 0; i < 9; i++){
+            out_array[i+48] = F_s[9*sn+i];
+        }
+        out_array[57] = sigma_inv;
+        out_array[58] = bar_tauw;
+
+
+    } catch(std::exception& e) {
+        cout << e.what() << "\n";
+        return 1;
+    }
+
+    return 0;
 }
 
 //Initialize the reference vessel for the simulation    
@@ -2429,3 +2535,4 @@ void vessel::save() {
     ar.close();
     //std::cout << "Saved vessel." << "\n";
 };
+

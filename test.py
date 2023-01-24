@@ -18,11 +18,14 @@ if os.path.exists('vessel.pickle'):
     simulation_vessel.startTime = simulation_vessel.currTime
 else:
     simulation_vessel = vessel.Vessel(radius=0.857, thickness=0.07, length=0.857*2, numLen=8, numCirc=12)
-    simulation_vessel.initializeVessel()
-    simulation_vessel.runFluidIteration()
+    simulation_vessel.simulationExecutable = "-np 24 ~/svFSI-build/svFSI-build/mysvfsi"
+    simulation_vessel.setInputFileValues()
     os.system('mkdir -p ' + simulation_vessel.outputDir)
     os.system('mkdir -p ' + 'meshIterations')
     os.system('mkdir -p ' + 'meshResults')
+
+    simulation_vessel.initializeVessel()
+    simulation_vessel.runFluidIteration()
 
 
 startTime = time.time()
