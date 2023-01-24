@@ -99,6 +99,7 @@ public:
 
     //Phenomenologic immune parameters
     double Ki_p_h, Ki_d_h;
+    double tevg_val;
 
     //Flags
     int num_exp_flag; //indicates whether doing reg G&R step or a numerical experiment
@@ -159,7 +160,7 @@ public:
     void initializeNativeHandshake(string native_name, double n_days_inp = 10, double dt_inp = 1);
     void initializeTEVG(string scaffold_name, string immune_name,vessel const &native_vessel, double infl_scale_trans, double n_days_inp = 10, double dt_inp = 1);
     void initializeTEVGExplicit(string scaffold_name, string immune_name,vessel const &native_vessel, double infl_scale_trans, double n_days_inp = 10, double dt_inp = 1);
-    void initializeTEVGHandshake(string scaffold_name, string immune_name, double infl_scale_trans, double n_days_inp = 10, double dt_inp = 1);
+    void initializeTEVGHandshake(string scaffold_name, string immune_name, double tevg_arg, double n_days_inp = 10, double dt_inp = 1);
 
     //TODO
     //~Vessel() destructor

@@ -1,10 +1,10 @@
 CC = g++ -std=c++11
-CFLAGS =
+CFLAGS = -fpic
 LDFLAGS=
-LDLIBS = -lgsl -lgslcblas -lm -lboost_program_options -D_GLIBCXX_USE_CXX11_ABI=1
-SOURCES= vessel.cpp matfun.cpp functions.cpp main.cpp 
+LDLIBS = -lgsl -lgslcblas -lm -lboost_program_options -D_GLIBCXX_USE_CXX11_ABI=0
+SOURCES= vessel.cpp matfun.cpp functions.cpp main_function.cpp 
 OBJECTS=$(SOURCES:.cpp=.o)
-EXECUTABLE=gnr
+EXECUTABLE=gnr_function
 
 all: $(SOURCES) $(EXECUTABLE)
 
@@ -15,4 +15,5 @@ $(EXECUTABLE): $(OBJECTS)
 	$(CC) $(CFLAGS) $< -c -o $@ $(LDLIBS)
 
 clean:
-	rm -f *.o *.mod *~ *_out_* $(EXECUTABLE)
+	rm -f *.o *.mod *~ $(EXECUTABLE)
+

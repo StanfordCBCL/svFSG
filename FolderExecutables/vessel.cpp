@@ -1744,7 +1744,7 @@ void vessel::initializeTEVGExplicit(string scaffold_name, string immune_name, ve
     Immune_in.close();
 }
 
-void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, double infl_scale_trans, double n_days_inp, double dt_inp) {
+void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, double tevg_arg, double n_days_inp, double dt_inp) {
 
     //Read in scaffold properties/immune properties and store
     //Input arguments for scaffold input file (ELS)
@@ -1762,6 +1762,7 @@ void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, d
     s = 0; //Initialize the actual current time to zero
 
     double mu = 0; //apparent viscosity
+    tevg_val = tevg_arg;
 
     //Geometric parameters
     //Homeostatic parameters are those for a NATIVE vessel
@@ -1801,11 +1802,25 @@ void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, d
     //Fit_in >> c1_p1 >> c1_p2;;
     double gamma_i_1, gamma_i_2;
     Immune_in >> gamma_i_1 >> gamma_i_2;
+
+
+    //Adding tevg_arg to determine how much stiffer inflammation material is
+    double gamma_i_1_r;
+    double gamma_i_2_r;
+
+    if (tevg_val > 1) {
+        gamma_i_1_r = gamma_i_1;
+        gamma_i_2_r = gamma_i_2;
+    } else {
+        gamma_i_1_r = (gamma_i_1 * tevg_val) + (1.0 * (1.0 - tevg_val));
+        gamma_i_2_r = (gamma_i_2 * tevg_val) + (1.0 * (1.0 - tevg_val));
+    }
+
     c_alpha_h = { c1_p1, c2_p1, c1_p2, c2_p2,
         c1_m, c2_m, c1_ct, c2_ct, c1_cz, c2_cz, c1_cd1, c2_cd1, c1_cd2, c2_cd2,
-        c1_m * gamma_i_1, c2_m * gamma_i_2, c1_ct * gamma_i_1, c2_ct * gamma_i_2,
-        c1_cz * gamma_i_1, c2_cz * gamma_i_2, c1_cd1 * gamma_i_1, c2_cd1 * gamma_i_2,
-        c1_cd2 * gamma_i_1, c2_cd2 * gamma_i_2, c1_gnd, c2_gnd };
+        c1_m * gamma_i_1_r, c2_m * gamma_i_2_r, c1_ct * gamma_i_1_r, c2_ct * gamma_i_2_r,
+        c1_cz * gamma_i_1_r, c2_cz * gamma_i_2_r, c1_cd1 * gamma_i_1_r, c2_cd1 * gamma_i_2_r,
+        c1_cd2 * gamma_i_1_r, c2_cd2 * gamma_i_2_r, c1_gnd, c2_gnd };
 
     //Constituent orientations
     //Orientations in the reference configuration (the in vivo state for the DTA)
@@ -1963,7 +1978,7 @@ void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, d
     double ps_norm, fd_norm;
     Immune_in >> ps_norm >> fd_norm;
 
-    double K_i_p_trans = infl_scale_trans * K_i_p_mic * (ps_p / ps_norm * fd_p / fd_norm) + K_i_p_wound;
+    double K_i_p_trans = K_i_p_mic * (ps_p / ps_norm * fd_p / fd_norm) + K_i_p_wound;
     double K_i_p_steady = K_i_p_mic * (ps_norm / ps_p + fd_p / fd_norm - 2);
     K_i_p_steady = (K_i_p_steady > 0)* K_i_p_steady;
     double K_i_d = K_i_p_trans / K_i_d_max;
@@ -1997,7 +2012,7 @@ void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, d
         gamma_fun = (pow(delta_i_p, beta_i_p)) * pow(s, beta_i_p - 1) * exp(-delta_i_p * s)
             / (delta_i_p * pow((beta_i_p - 1), (beta_i_p - 1)) * exp(1 - beta_i_p));
         steady_fun = (1 - exp(-delta_i_p * s));
-        ups_infl_p[sn] = K_i_p_trans* gamma_fun + K_i_p_steady * steady_fun;
+        ups_infl_p[sn] = tevg_val*K_i_p_trans*gamma_fun + K_i_p_steady*steady_fun;
         ups_infl_d[sn] = K_i_d;
 
     }
