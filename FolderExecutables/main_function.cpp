@@ -24,15 +24,9 @@ using std::cout;
 double um_to_m = pow(10, -6);
 double mm_to_m = pow(10, -3);
 double kPa_to_Pa = pow(10, 3);
-
-extern "C" {
-// include below each method you want to make visible outside
-vessel* init(int k) {return new vessel();}
-void initializeVesselHandshake(vessel *self, char* prefix_char, char* name_char,int num_days, double step_size,double anysm_arg, double tevg_arg) {self->initializeVesselHandshake(prefix_char, name_char, num_days, step_size, anysm_arg, tevg_arg);}
-int updateVesselHandshake(vessel *self,int restart_arg, int iter_arg, double sigma_arg, double tauw_arg, double * F, double * out_array) {return self->updateVesselHandshake(restart_arg, iter_arg, sigma_arg, tauw_arg, F, out_array);}
-
-// Note: the '__declspec(dllexport)' is only necessary in Windows
-
+#ifdef __cplusplus
+extern "C"
+#endif
 int run(char* prefix_char, char* name_char, int restart_arg, int iter_arg, int gnr_arg, int num_days, double step_size,
         double sigma_arg, double tauw_arg, double anysm_arg, double tevg_arg, double F0, double F1, double F2, double F3, double F4,
         double F5, double F6, double F7, double F8) {
@@ -177,7 +171,6 @@ int run(char* prefix_char, char* name_char, int restart_arg, int iter_arg, int g
 
     return 0;
 
-}
 }
 
 int main(){}

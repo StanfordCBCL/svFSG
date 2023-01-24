@@ -5,11 +5,7 @@ import vtk
 import os
 import pickle
 from tqdm import tqdm
-import multiprocessing
-from multiprocessing import Pool, Manager
-from cvessel import cvessel
-import time
-os.system("taskset -p 0xff %d" % os.getpid())
+from multiprocessing import Pool
 
 
 def read_data(file_name, file_format="vtp", datatype=None):
@@ -105,41 +101,29 @@ def thresholdModel(data,dataName,low,high,extract=True,cell=False):
     else:
         return pv.wrap(t.GetOutput())
 
-                
-def initializePoolWorker(pool_input_array):
-    global output_array
-    global cvessels
-    global rank
-    global numData
+def parsePoint(inputData):
 
-    rank = multiprocessing.current_process()._identity[0]-1
-    print("Initializing data on rank " + str(rank))
-    input_array = pool_input_array[rank]
-    numData = len(input_array)
+    cellId = inputData[0]
+    gaussId = inputData[1]
+    outputDir = inputData[2]
 
-    cvessels = [cvessel] * numData
-
-    for i in range(numData):
-        input_data = input_array[i]
-        outputDir,num_id,max_days,gnr_step_size, aneurysmValue, tevgValue = input_data
-        cvessels[i] = cvessel()
-        cvessels[i].initializeVesselHandshake(outputDir,num_id,max_days,gnr_step_size, aneurysmValue, tevgValue)
+    output_HnS = np.loadtxt(outputDir + '/HnS_out_python_'+str(cellId)+'_'+str(gaussId))
+    J_curr =  np.linalg.det(np.reshape(output_HnS[-1,48:57], (3,3)))
+    J_target = output_HnS[-1,46]/output_HnS[-1,47]
+    # Change in volume from current to target
+    # J_di = J_target/J_curr
     
-    output_array = [[0]*59]*(numData)
+    stiffness = output_HnS[-1,1:37]
+    sigma = output_HnS[-1,37:46]
 
-    return
+    # Dont forget units 
+    stiffness = np.array(stiffness)*10.0
+    sigma = np.array(sigma)*10.0
 
-def runPoolWorker(pool_input_array):
-
-    print("Running data on rank " + str(rank))
-    input_array = pool_input_array[rank]
-
-    for i in range(numData):
-        input_data = input_array[i]
-        timeStep, timeIter,sigma_inv,wss,defGrad_mem_g = input_data
-        output_array[i] = cvessels[i].updateVesselHandshake(timeStep, timeIter,sigma_inv,wss,defGrad_mem_g)
-
-    return output_array
+    sigma_inv = output_HnS[-1,57]
+    wss = output_HnS[-1,58]
+    
+    return (J_target, J_curr, stiffness, sigma, wss, sigma_inv)
 
 
 def clean(data, tolerance=None):

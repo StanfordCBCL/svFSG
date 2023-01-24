@@ -51,16 +51,16 @@ Add equation: struct {
    Tolerance: 1e-4
 
    Constitutive model: mm
-   #Dilational penalty model: M94
-   Penalty parameter: 100000000.0
+   Dilational penalty model: M94
+   Penalty parameter: 1e7
    Density: 0.0
-   Mass damping: 10000.0
+   Mass damping: 1e4
 
    LS type: BICGS {
-      Preconditioner: Trilinos-BlockJacobi
-      Tolerance: 0.1
-      Max iterations: 1000
-      Krylov space dimension: 250
+      Preconditioner: Trilinos-diagonal
+      Tolerance: 1e-4
+      Max iterations: 100000
+      Krylov space dimension: 100
    }
    
    Output: Spatial {

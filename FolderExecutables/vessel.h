@@ -141,8 +141,6 @@ public:
     double um_to_m = pow(10, -6);
     double mm_to_m = pow(10, -3);
     double kPa_to_Pa = pow(10, 3);
-    double aneurysm_val = 0.0;
-    double tevg_val = 0.0;
 
     std::ofstream GnR_out, Equil_GnR_out, Exp_out, Mat_out, HnS_out;
 
@@ -156,9 +154,6 @@ public:
     void printNativeOutputs();
     void printOutputsHandshake();
     void printNativeEquilibratedOutputs();
-    void initializeVesselHandshake(char* prefix_char, char* name_char, int num_days, double step_size,double anysm_arg, double tevg_arg);
-    int updateVesselHandshake(int restart_arg, int iter_arg, double sigma_arg, double tauw_arg, double * F, double * out_array);
-
     void initializeNative(string native_name, double n_days_inp = 10, double dt_inp = 1);
     void initializeNativeExplicit(string native_name, double n_days_inp = 10, double dt_inp = 1);
     void initializeNativeHandshake(string native_name, double n_days_inp = 10, double dt_inp = 1);

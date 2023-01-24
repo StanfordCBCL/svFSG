@@ -74,7 +74,7 @@ Add equation: fluid {
    Add BC: lumen_inlet {
       Type: Dir
       Time dependence: Steady
-      Value: -20
+      Value: -20.0
       Impose flux: 1
       Profile: Parabolic
    }   

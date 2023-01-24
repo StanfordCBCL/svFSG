@@ -84,9 +84,9 @@ Add equation: FSI {
    Domain: 1 { 
       Equation: struct
       Constitutive model: anisotropic
-      Penalty parameter: 100000000.0
+      Penalty parameter: 1e8
       Density: 0.0
-      Mass damping: 10000.0
+      Mass damping: 1e6
    }
 
 
@@ -116,7 +116,7 @@ Add equation: FSI {
    Add BC: lumen_inlet {
       Type: Dir
       Time dependence: Steady
-      Value: -20
+      Value: -20.0
       Impose flux: 1
       Profile: Parabolic
       Zero out perimeter: f
