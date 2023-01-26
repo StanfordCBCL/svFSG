@@ -29,7 +29,7 @@ class Vessel():
         self.tevg = kwargs.get("tevg", 0)
         self.timeStep = 0
         self.timeIter = 0
-        self.omega = 0.1
+        self.omega = 0.5
         self.inletFlow = kwargs.get("inletFlow", -20)
         self.outletPressure = kwargs.get("outletPressure", 6150)
         self.residual = 1.0
@@ -49,7 +49,8 @@ class Vessel():
         self.penalty = kwargs.get("penalty", 1e7)
         self.startTime = 0.0
         self.currTime = 0.0
-        self.tolerance = kwargs.get("tolerance", 1e-4)
+        self.tolerance = kwargs.get("tolerance", 1e-3)
+        self.segmentationName = kwargs.get("segmentationName", None)
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -91,10 +92,6 @@ class Vessel():
         self.updateFluidSolidResults()
         self.appendSolidResult()
         self.appendIterfaceResult()
-        self.updateMaterial()
-        self.updateReference()
-        self.saveReference()
-        self.checkResidual()
         return
 
     def runSolidIteration(self):
@@ -103,6 +100,9 @@ class Vessel():
         self.runSolid()
         self.updateSolidResults()
         self.appendSolidResult()
+        return
+
+    def runMaterialIteration(self):
         self.updateMaterial()
         self.updateReference()
         self.saveReference()
@@ -111,10 +111,10 @@ class Vessel():
 
     def checkResidual(self):
         tolTypes = ["disp", "sigma_inv", "wss", "jac"]
-        tol1 = np.max(self.vesselReference.get_array('residual_curr'))
+        tol1 = np.max(np.linalg.norm(self.vesselReference.get_array('residual_curr'),axis=1))
         tol2 = np.max(abs((self.vesselReference.get_array('inv_prev')-self.vesselReference.get_array('inv_curr'))/self.sigma_h))
         tol3 = np.max(abs((self.vesselReference.get_array('wss_prev')-self.vesselReference.get_array('wss_curr'))/self.tau_h))
-        tol4 = 0.01*np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0))
+        tol4 = np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0)/10.0)
         tolVals = np.array([tol1,tol2,tol3,tol4])
         self.residual = np.max(tolVals)
         self.residualType = tolTypes[tolVals.argmax()]
@@ -147,8 +147,11 @@ class Vessel():
         if self.vesselType == "cylinder":
             self.vesselReference = self.initializeCylinder()
             self.estimateIterfaceResult()
+        if self.vesselType == "segmentation":
+            self.vesselReference = self.initializeSegmentation()
+            self.estimateIterfaceResult()
         else:
-            print("TODO: Implement segmentation initializer")
+            print("TODO: Implement new initializer")
         self.saveReference()
         return
 
@@ -427,7 +430,7 @@ class Vessel():
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
-                self.omega = 0.1
+                self.omega = 0.5
 
         # Calculate cauchy green tensor
         for q in range(numPts):
@@ -554,7 +557,7 @@ class Vessel():
 
 
     def initializeCylinder(self):
-        print("Initializing vessel...")
+        print("Initializing cylindrical vessel...")
 
         with open('FolderVesselConfigurationFiles/Native_in_handshake_') as f:
             lines = f.readlines()[1:]
@@ -697,6 +700,9 @@ class Vessel():
         vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_prev"))
 
 
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="center"))
+
+
         vol.GetCellData().AddArray(pv.convert_array(e_r.astype(float),name="e_r"))
         vol.GetCellData().AddArray(pv.convert_array(e_t.astype(float),name="e_t"))
         vol.GetCellData().AddArray(pv.convert_array(e_z.astype(float),name="e_z"))
@@ -717,6 +723,232 @@ class Vessel():
 
         return vol
 
+
+    def initializeSegmentation(self):
+        """
+        Initialize points and coordinate system for segmentation
+        """
+        print("Initializing segmented vessel...")
+
+        #Store ctgr slice points
+        ctgrPtsInner = parseCTGR(self.segmentationName+'_inner.ctgr')
+        ctgrPtsOuter = parseCTGR(self.segmentationName+'_outer.ctgr')
+
+        numSegsInner = np.shape(ctgrPtsInner)[0]
+        numSegsOuter = np.shape(ctgrPtsOuter)[0]
+
+        if numSegsInner != numSegsOuter:
+            raise RuntimeError('Number of inner segmenetations does not equal number of outer segmentations!')
+
+        self.numLen = int(np.max([1,round((self.numLen) / (numSegsInner-1))]) * (numSegsInner-1))
+
+        #Align inner data to each other
+        for i in range(np.shape(ctgrPtsInner)[0]-1):
+            ctgrPtsInner[i+1] = alignContours(ctgrPtsInner[i],ctgrPtsInner[i+1])
+        #Align outer data to inner data
+        for i in range(np.shape(ctgrPtsInner)[0]):
+            ctgrPtsOuter[i] = alignContours(ctgrPtsInner[i],ctgrPtsOuter[i])
+
+
+        # Now reparameterize to desired number of points
+        ctgrPtsInner = interpolateSplineArray(ctgrPtsInner,periodic=True,numPts=self.numCirc)
+        ctgrPtsInner = interpolateSplineArray(np.moveaxis(ctgrPtsInner,0,1),numPts=self.numLen+1,redistribute=False)
+        ctgrPtsInner = np.moveaxis(ctgrPtsInner,0,1)
+
+        ctgrPtsOuter = interpolateSplineArray(ctgrPtsOuter,periodic=True,numPts=self.numCirc)
+        ctgrPtsOuter = interpolateSplineArray(np.moveaxis(ctgrPtsOuter,0,1),numPts=self.numLen+1,redistribute=False)
+        ctgrPtsOuter = np.moveaxis(ctgrPtsOuter,0,1)
+
+
+
+        with open('FolderVesselConfigurationFiles/Native_in_handshake_') as f:
+            lines = f.readlines()[1:]
+            nativeIn = []
+            for line in lines:
+                nativeIn.append([float(x) for x in line.split()])
+
+
+        self.sigma_h = nativeIn[13][0]
+        self.tau_h = nativeIn[13][1]
+
+        #Build material array (constant for now)
+        materialArray = [ nativeIn[7][0],nativeIn[4][0],nativeIn[4][1],nativeIn[4][2],nativeIn[2][0]*10.0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][2],nativeIn[5][2],nativeIn[2][4]*10.0,nativeIn[2][5],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][3],nativeIn[5][3],nativeIn[2][6]*10.0,nativeIn[2][7],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][4],nativeIn[5][4],nativeIn[2][8]*10.0,nativeIn[2][9],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][5],nativeIn[5][5],nativeIn[2][10]*10.0,nativeIn[2][11],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][1],nativeIn[5][1],nativeIn[2][2]*10.0,nativeIn[2][3],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][2],nativeIn[16][0],nativeIn[14][2],nativeIn[14][1],0,0,0,0,0,0,0,0,0,0]
+
+        #********************
+
+        points = np.empty([(self.numCirc+1)*(self.numLen+1)*(self.numRad+1),3])
+
+        structureIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        innerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        outerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        proximalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+
+        proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
+        distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
+        innerIds[0:(self.numCirc+1)*(self.numLen+1)*(self.numRad+1):(self.numRad+1)]=1
+        outerIds[self.numRad:(self.numCirc+1)*(self.numLen+1)*(self.numRad+1):(self.numRad+1)]=1
+
+        fluidStressQueryIds = np.zeros(self.numCirc*self.numLen*self.numRad)
+        solidStressQueryIds = np.zeros(self.numCirc*self.numLen*self.numRad)
+
+        tevgValue = np.zeros(self.numCirc*self.numLen*self.numRad)
+        aneurysmValue = np.zeros(self.numCirc*self.numLen*self.numRad)
+        simulateIds = np.ones(self.numCirc*self.numLen*self.numRad)
+
+        e_r = np.zeros((self.numCirc*self.numLen*self.numRad,3))
+        e_t = np.zeros((self.numCirc*self.numLen*self.numRad,3))
+        e_z = np.zeros((self.numCirc*self.numLen*self.numRad,3))
+
+        e_ma = np.zeros((self.numCirc*self.numLen*self.numRad,98))
+
+        for i in range(self.numLen+1):
+            for j in range(self.numCirc+1):
+                for k in range(self.numRad+1):
+                    xPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,0] - ctgrPtsInner[i,j%self.numCirc,0]) + ctgrPtsInner[i,j%self.numCirc,0]
+                    yPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,1] - ctgrPtsInner[i,j%self.numCirc,1]) + ctgrPtsInner[i,j%self.numCirc,1]
+                    zPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,2] - ctgrPtsInner[i,j%self.numCirc,2]) + ctgrPtsInner[i,j%self.numCirc,2]
+
+                    structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
+                    points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = [xPt, yPt, zPt]
+
+
+        coords=[[0, 1, 0],
+                [0, 1, 1],
+                [1, 1, 1],
+                [1, 1, 0],
+                [0, 0, 0],
+                [0, 0, 1],
+                [1, 0, 1],
+                [1, 0, 0]]
+
+
+        for i in range(self.numLen):
+            for j in range(self.numCirc):
+                for k in range(self.numRad):
+
+                    cellPts = []
+
+                    for coord in coords:
+                        cellPts.append(points[(i+coord[0])*(self.numCirc+1)*(self.numRad+1) + (j+coord[1])*(self.numRad+1) + (k+coord[2]),:])
+
+                    cellPts = np.array(cellPts)
+
+                    cellCenter = np.mean(cellPts,axis=0)
+
+                    xPt = cellCenter[0]
+                    yPt = cellCenter[1]
+                    zPt = cellCenter[2]
+
+                    v_r = np.mean(cellPts[[1,2,5,6]],axis=0) - np.mean(cellPts[[0,3,4,7]],axis=0)
+                    v_r = v_r/np.linalg.norm(v_r)
+                    v_t = np.mean(cellPts[[0,1,2,3]],axis=0) - np.mean(cellPts[[4,5,6,7]],axis=0)
+                    v_t = v_t/np.linalg.norm(v_t)
+
+                    v_z = np.cross(v_r,v_t)
+                    v_z = v_z/np.linalg.norm(v_z)
+                    v_t = np.cross(v_z,v_r)
+                    v_t = v_t/np.linalg.norm(v_t)
+                    #v_z = np.mean(cellPts[[1,2,5,6]],axis=0) - np.mean(cellPts[[0,3,4,7]],axis=0)
+                    #v_z = v_z/np.linalg.norm(v_z)
+
+                    e_r[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_r
+                    e_t[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_t
+                    e_z[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_z
+
+                    A = np.array([v_r,v_t,v_z])
+                    # Is this a rotation matrix?
+                    if np.sometrue(np.abs(np.dot(np.array(A), np.transpose(np.array(A))) - 
+                                          np.eye(3, dtype=float)) > 1e-6):
+                        print(A)
+                        raise RuntimeError('Matrix *A* does not describe a rotation.')
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,:] = materialArray
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,5:8]   = v_r
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,8:11]  = v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,11:14] = v_z
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,18:21] =  np.cos(90.0*np.pi/180.0)*v_z + np.sin(90.0*np.pi/180.0)*v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,32:35] =  np.cos(0.0*np.pi/180.0)*v_z + np.sin(0.0*np.pi/180.0)*v_t
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,46:49] =  np.cos(41.94*np.pi/180.0)*v_z + np.sin(41.94*np.pi/180.0)*v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,60:63] =  np.cos(318.06*np.pi/180.0)*v_z + np.sin(318.06*np.pi/180.0)*v_t
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,74:77] =  np.cos(90.0*np.pi/180.0)*v_z + np.sin(90.0*np.pi/180.0)*v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,88:91] =  np.cos(90.0*np.pi/180.0)*v_z + np.sin(90.0*np.pi/180.0)*v_t
+
+                    fluidStressQueryIds[k + j*self.numRad + i*self.numRad*self.numCirc] = j*self.numRad + i*self.numRad*self.numCirc
+                    solidStressQueryIds[k + j*self.numRad + i*self.numRad*self.numCirc] = j*self.numRad + i*self.numRad*self.numCirc + self.numRad
+
+                    if self.tevg:
+                        tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getTEVGValue([xPt,yPt,zPt], self.radius)
+                    if self.aneurysm:
+                        aneurysmValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getAneurysmValue([xPt,yPt,zPt], self.radius)
+
+        vol = pv.StructuredGrid()
+        vol.points = points
+        vol.dimensions = [self.numRad+1, self.numCirc+1, self.numLen+1]
+
+        numCells = vol.GetNumberOfCells()
+        vol.GetPointData().AddArray(pv.convert_array((proximalIds).astype(int),name="ProximalRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((distalIds).astype(int),name="DistalRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((innerIds).astype(int),name="InnerRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((outerIds).astype(int),name="OuterRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((structureIds).astype(int),name="StructureID"))
+        vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="GlobalElementID"))
+        vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="CellStructureID"))
+        vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="varWallProps"))
+
+        #Exchange these to gauss point quantities
+        #Matrices/arrays
+        vol.GetCellData().AddArray(pv.convert_array(np.zeros((self.numCirc*self.numLen*self.numRad,45*8)).astype(float),name="temp_array"))
+
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.array([1,0,0,0,1,0,0,0,1]),8),(numCells,1)).astype(float),name="defGrad"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.array([1,0,0,0,1,0,0,0,1]),8),(numCells,1)).astype(float),name="defGrad_mem"))
+
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(36),8),(numCells,1)).astype(float),name="stiffness_mem"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(9),8),(numCells,1)).astype(float),name="sigma_mem"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(6),8),(numCells,1)).astype(float),name="sigma_gnr"))
+        #Scalar values
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_curr"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_target"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([0],8),(numCells,1)).astype(float),name="p_est"))
+
+        vol.GetCellData().AddArray(pv.convert_array(np.ones(numCells).astype(float),name="J_c"))
+        vol.GetCellData().AddArray(pv.convert_array(np.zeros(numCells).astype(float),name="p_est_c"))
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numCells).astype(float),name="wss_curr"))
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numCells).astype(float),name="wss_prev"))
+
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_curr"))
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_prev"))
+
+
+        vol.GetCellData().AddArray(pv.convert_array(e_r.astype(float),name="e_r"))
+        vol.GetCellData().AddArray(pv.convert_array(e_t.astype(float),name="e_t"))
+        vol.GetCellData().AddArray(pv.convert_array(e_z.astype(float),name="e_z"))
+        vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="material_global"))
+        vol.GetCellData().AddArray(pv.convert_array(fluidStressQueryIds.astype(int),name="fluidStressQueryID"))
+        vol.GetCellData().AddArray(pv.convert_array(solidStressQueryIds.astype(int),name="solidStressQueryID"))
+        vol.GetCellData().AddArray(pv.convert_array(simulateIds.astype(int),name="Simulate"))
+        vol.GetCellData().AddArray(pv.convert_array(aneurysmValue.astype(float),name="aneurysmValue"))
+        vol.GetCellData().AddArray(pv.convert_array(tevgValue.astype(float),name="tevgValue"))
+        vol = vol.cast_to_unstructured_grid()
+        vol = clean(vol, tolerance=1e-10)
+        numPts = vol.GetNumberOfPoints()
+        vol.GetPointData().AddArray(pv.convert_array(np.linspace(1,numPts,numPts).astype(int),name="GlobalNodeID"))
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="displacements"))
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_curr"))
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_prev"))
+        vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
+
+        return vol
 
 
     def generateFluidMesh(self, surf):

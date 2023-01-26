@@ -4,9 +4,11 @@ import pyvista as pv
 import vtk
 import os
 import pickle
+import re
+import sys
+import scipy.interpolate as si
 from tqdm import tqdm
 from multiprocessing import Pool
-
 
 def read_data(file_name, file_format="vtp", datatype=None):
     """
@@ -478,3 +480,108 @@ def interpolateSolution(source, target):
         target.GetPointData().GetArray('Velocity').SetTuple(q,source.GetPointData().GetArray('Velocity').GetTuple(pointIdSource))
 
     return target
+
+
+
+
+def parseCTGR(filename):
+    """
+    Read SimVascular segmentation file and return points
+    """
+    inFile = open(filename, 'r')
+    data = []
+    for line in inFile:
+        dataGroup = []
+        if '<contour_points>' in line:
+            for line in inFile:
+                if '</contour_points>' in line:
+                    # Interpolate so that every slice has same number of points
+                    dataGroup = interpolateSpline(dataGroup,periodic=True,numPts=1000)
+                    data.append(dataGroup)
+                    break
+                else:
+                    dataLine = re.findall('"([^"]*)"', line)
+                    dataLine = [float(x) for x in dataLine]
+                    dataGroup.append(dataLine[1:])
+
+    return np.array(data)
+
+
+def alignContours(array1,array2):
+    """
+    Align contours to minimize summed distance between splines
+    """
+    #Aligns contours
+    #TODO: Flipped cases
+    dist = sys.maxsize
+    array3 = array2
+    
+    for i in range(np.shape(array2)[0]):
+        arrayTemp = np.vstack((array2[i:,:],array2[:i,:]))
+        distTemp = np.linalg.norm(array1-arrayTemp)
+        if distTemp < dist:
+            dist = distTemp
+            array3 = arrayTemp
+
+    return array3
+
+def interpolateSplineArray(array,numPts = 20,periodic = False,degree=3,redistribute=True):
+    """
+    Interpolate an array of segmentations into an evenly-spaced spline.
+    """
+
+    numSegs, numOldPts, numDim = np.shape(array)
+
+
+    newArray = np.zeros((numSegs,numPts,3))
+
+    for i in range(numSegs):
+        newArray[i] = interpolateSpline(array[i],numPts,periodic,degree,redistribute)
+
+    return newArray
+
+
+def interpolateSpline(array,numPts = 20,periodic = False,degree=3,redistribute=True):
+    """
+    Interpolate a series of points into an evenly-spaced spline.
+    """
+    array = np.array(array)
+
+    if periodic:
+        numPts+=1
+
+    xa = array[:,0]
+    ya = array[:,1]
+    za = array[:,2]
+    
+    xb = []
+    yb = []
+    zb = []
+
+    if periodic:
+        x = np.append(xa,xa[0])
+        y = np.append(ya,ya[0])
+        z = np.append(za,za[0])
+    else:
+        x = xa
+        y = ya
+        z = za
+    # fit splines to x=f(u) and y=g(u), treating both as periodic. also note 
+    # that s=0 is needed in order to force the spline fit to pass through all 
+    # the input points.
+
+    tck, u = si.splprep([x,y,z], u=None, s=0.0, per=periodic,k=degree)
+    # evaluate the spline fits for evenly spaced distance values
+    if redistribute:
+        uAdd = np.linspace(u.min(), u.max(), numPts)
+    else:
+        numU = len(u)
+        iX = np.linspace(0, 1, numPts)*(numU-1)
+        iXp = np.arange(numU)
+        uAdd = np.interp(iX, iXp, np.asarray(u))
+
+    if periodic:
+        uAdd = uAdd[:-1]
+    xi, yi, zi = si.splev(uAdd, tck)
+
+    return np.transpose(np.vstack((xi,yi,zi)))
