@@ -51,6 +51,8 @@ class Vessel():
         self.currTime = 0.0
         self.tolerance = kwargs.get("tolerance", 1e-3)
         self.segmentationName = kwargs.get("segmentationName", None)
+        self.estimateOuterSegmentation = kwargs.get("estimateOuterSegmentation",False)
+        self.thicknessRatio = kwargs.get("thicknessRatio",0.1)
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -376,9 +378,9 @@ class Vessel():
             for p in range(cellPts.GetNumberOfIds()):
                 ptId = cellPts.GetId(p)
                 if self.vesselReference.GetPointData().GetArray('InnerRegionID').GetTuple1(ptId) == 1:
-
+                    fluidCenter = self.vesselReference.GetPointData().GetArray('center').GetTuple3(ptId)
                     fluidCoordinate = np.array(self.vesselReference.GetPoint(ptId)) + np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(ptId))
-                    pointRadius = np.linalg.norm(fluidCoordinate[0:2])
+                    pointRadius = np.linalg.norm(fluidCoordinate - fluidCenter)
                     self.vesselReference.GetPointData().GetArray('Pressure').SetTuple1(ptId,self.outletPressure)
                     radius += pointRadius
                     numberOfPoints += 1
@@ -586,6 +588,7 @@ class Vessel():
         outerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         proximalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        centers = np.zeros(((self.numCirc+1)*(self.numLen+1)*(self.numRad+1),3))
 
         proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
         distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
@@ -614,6 +617,7 @@ class Vessel():
                     zPt = self.length*i/self.numLen - self.length/2.0
                     structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
                     points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = [xPt, yPt, zPt]
+                    centers[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] =  [0,0,zPt]
 
 
         for i in range(self.numLen):
@@ -675,6 +679,7 @@ class Vessel():
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="GlobalElementID"))
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="CellStructureID"))
         vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="varWallProps"))
+        vol.GetPointData().AddArray(pv.convert_array((centers).astype(float),name="center"))
 
         #Exchange these to gauss point quantities
         #Matrices/arrays
@@ -698,9 +703,6 @@ class Vessel():
 
         vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_curr"))
         vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_prev"))
-
-
-        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="center"))
 
 
         vol.GetCellData().AddArray(pv.convert_array(e_r.astype(float),name="e_r"))
@@ -732,22 +734,24 @@ class Vessel():
 
         #Store ctgr slice points
         ctgrPtsInner = parseCTGR(self.segmentationName+'_inner.ctgr')
-        ctgrPtsOuter = parseCTGR(self.segmentationName+'_outer.ctgr')
-
         numSegsInner = np.shape(ctgrPtsInner)[0]
-        numSegsOuter = np.shape(ctgrPtsOuter)[0]
 
-        if numSegsInner != numSegsOuter:
-            raise RuntimeError('Number of inner segmenetations does not equal number of outer segmentations!')
+        if not self.estimateOuterSegmentation:
+            ctgrPtsOuter = parseCTGR(self.segmentationName+'_outer.ctgr')
+            numSegsOuter = np.shape(ctgrPtsOuter)[0]
+            if numSegsInner != numSegsOuter:
+                raise RuntimeError('Number of inner segmenetations does not equal number of outer segmentations!')
 
         self.numLen = int(np.max([1,round((self.numLen) / (numSegsInner-1))]) * (numSegsInner-1))
 
         #Align inner data to each other
         for i in range(np.shape(ctgrPtsInner)[0]-1):
             ctgrPtsInner[i+1] = alignContours(ctgrPtsInner[i],ctgrPtsInner[i+1])
-        #Align outer data to inner data
-        for i in range(np.shape(ctgrPtsInner)[0]):
-            ctgrPtsOuter[i] = alignContours(ctgrPtsInner[i],ctgrPtsOuter[i])
+
+        if not self.estimateOuterSegmentation:
+            #Align outer data to inner data
+            for i in range(np.shape(ctgrPtsInner)[0]):
+                ctgrPtsOuter[i] = alignContours(ctgrPtsInner[i],ctgrPtsOuter[i])
 
 
         # Now reparameterize to desired number of points
@@ -755,9 +759,10 @@ class Vessel():
         ctgrPtsInner = interpolateSplineArray(np.moveaxis(ctgrPtsInner,0,1),numPts=self.numLen+1,redistribute=False)
         ctgrPtsInner = np.moveaxis(ctgrPtsInner,0,1)
 
-        ctgrPtsOuter = interpolateSplineArray(ctgrPtsOuter,periodic=True,numPts=self.numCirc)
-        ctgrPtsOuter = interpolateSplineArray(np.moveaxis(ctgrPtsOuter,0,1),numPts=self.numLen+1,redistribute=False)
-        ctgrPtsOuter = np.moveaxis(ctgrPtsOuter,0,1)
+        if not self.estimateOuterSegmentation:
+            ctgrPtsOuter = interpolateSplineArray(ctgrPtsOuter,periodic=True,numPts=self.numCirc)
+            ctgrPtsOuter = interpolateSplineArray(np.moveaxis(ctgrPtsOuter,0,1),numPts=self.numLen+1,redistribute=False)
+            ctgrPtsOuter = np.moveaxis(ctgrPtsOuter,0,1)
 
 
 
@@ -789,6 +794,7 @@ class Vessel():
         outerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         proximalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        centers = np.zeros(((self.numCirc+1)*(self.numLen+1)*(self.numRad+1),3))
 
         proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
         distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
@@ -811,9 +817,21 @@ class Vessel():
         for i in range(self.numLen+1):
             for j in range(self.numCirc+1):
                 for k in range(self.numRad+1):
-                    xPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,0] - ctgrPtsInner[i,j%self.numCirc,0]) + ctgrPtsInner[i,j%self.numCirc,0]
-                    yPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,1] - ctgrPtsInner[i,j%self.numCirc,1]) + ctgrPtsInner[i,j%self.numCirc,1]
-                    zPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,2] - ctgrPtsInner[i,j%self.numCirc,2]) + ctgrPtsInner[i,j%self.numCirc,2]
+                    center = np.mean(ctgrPtsInner[i],axis=0)
+                    centers[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = center
+                    if not self.estimateOuterSegmentation:
+                        xPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,0] - ctgrPtsInner[i,j%self.numCirc,0]) + ctgrPtsInner[i,j%self.numCirc,0]
+                        yPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,1] - ctgrPtsInner[i,j%self.numCirc,1]) + ctgrPtsInner[i,j%self.numCirc,1]
+                        zPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,2] - ctgrPtsInner[i,j%self.numCirc,2]) + ctgrPtsInner[i,j%self.numCirc,2]
+                    else:
+                        p_radius = np.linalg.norm(ctgrPtsInner[i,j%self.numCirc,:] - center)
+                        p_v_r = (ctgrPtsInner[i,j%self.numCirc,:] - center)/p_radius
+                        p_thickness = p_radius*self.thicknessRatio
+                        xPt = (k/self.numRad)*(p_thickness*p_v_r[0]) + ctgrPtsInner[i,j%self.numCirc,0]
+                        yPt = (k/self.numRad)*(p_thickness*p_v_r[1]) + ctgrPtsInner[i,j%self.numCirc,1]
+                        zPt = (k/self.numRad)*(p_thickness*p_v_r[2]) + ctgrPtsInner[i,j%self.numCirc,2]
+
+
 
                     structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
                     points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = [xPt, yPt, zPt]
@@ -902,6 +920,7 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array((innerIds).astype(int),name="InnerRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((outerIds).astype(int),name="OuterRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((structureIds).astype(int),name="StructureID"))
+        vol.GetPointData().AddArray(pv.convert_array((centers).astype(float),name="center"))
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="GlobalElementID"))
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="CellStructureID"))
         vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="varWallProps"))

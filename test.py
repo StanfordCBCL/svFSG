@@ -17,7 +17,9 @@ if os.path.exists('vessel.pickle'):
     simulation_vessel = loadVessel()
     simulation_vessel.startTime = simulation_vessel.currTime
 else:
-    simulation_vessel = vessel.Vessel(radius=0.857, vesselType="segmentation", segmentationName="ass_cyl", numLen=24, numCirc=24)
+    simulation_vessel = vessel.Vessel(radius=0.857, vesselType="segmentation", segmentationName="aorta_fsg", numLen=36, numCirc=24)
+    simulation_vessel.estimateOuterSegmentation = True
+    simulation_vessel.thicknessRatio = 0.0795
     simulation_vessel.damping = 1e4
     simulation_vessel.penalty = 1e8
     simulation_vessel.simulationExecutable = "-np 24 ~/svFSI-build/svFSI-build/mysvfsi"

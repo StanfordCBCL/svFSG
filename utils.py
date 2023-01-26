@@ -209,7 +209,7 @@ def getTEVGValue(point, radius):
         value = 1.0*(0.5*np.cos((np.pi/radius)*point[2])+0.5) + 0.25 
     return value
 
-def rotate_elastic_constants(C, A, tol=1e-4):
+def rotate_elastic_constants(C, A, tol=1e-2):
     """
     Return rotated elastic moduli for a general crystal given the elastic 
     constant in Voigt notation.
@@ -265,7 +265,7 @@ def Voigt_6x6_to_full_3x3x3x3(C):
                     C_out[i, j, k, l] = C[Voigt_i, Voigt_j]
     return C_out
 
-def full_3x3x3x3_to_Voigt_6x6(C, tol=1e-4, check_symmetry=True):
+def full_3x3x3x3_to_Voigt_6x6(C, tol=1e-2, check_symmetry=True):
     """
     Convert from the full 3x3x3x3 representation of the stiffness matrix
     to the representation in Voigt notation. Checks symmetry in that process.
@@ -511,11 +511,17 @@ def alignContours(array1,array2):
     """
     Align contours to minimize summed distance between splines
     """
-    #Aligns contours
-    #TODO: Flipped cases
     dist = sys.maxsize
     array3 = array2
     
+    for i in range(np.shape(array2)[0]):
+        arrayTemp = np.vstack((array2[i:,:],array2[:i,:]))
+        distTemp = np.linalg.norm(array1-arrayTemp)
+        if distTemp < dist:
+            dist = distTemp
+            array3 = arrayTemp
+
+    array2 = np.flip(array2,axis=0)
     for i in range(np.shape(array2)[0]):
         arrayTemp = np.vstack((array2[i:,:],array2[:i,:]))
         distTemp = np.linalg.norm(array1-arrayTemp)
