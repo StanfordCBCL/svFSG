@@ -206,10 +206,10 @@ def getTEVGValue(point, radius):
     """
     value = 0.0
     if abs(point[2]) <= radius:
-        value = 1.0*(0.5*np.cos((np.pi/radius)*point[2])+0.5) + 0.25 
+        value = 1.25*(0.5*np.cos((np.pi/radius)*point[2])+0.5) + 0.01
     return value
 
-def rotate_elastic_constants(C, A, tol=1e-2):
+def rotate_elastic_constants(C, A, tol=1e-4):
     """
     Return rotated elastic moduli for a general crystal given the elastic 
     constant in Voigt notation.
@@ -265,7 +265,7 @@ def Voigt_6x6_to_full_3x3x3x3(C):
                     C_out[i, j, k, l] = C[Voigt_i, Voigt_j]
     return C_out
 
-def full_3x3x3x3_to_Voigt_6x6(C, tol=1e-2, check_symmetry=True):
+def full_3x3x3x3_to_Voigt_6x6(C, tol=1e-4, check_symmetry=True):
     """
     Convert from the full 3x3x3x3 representation of the stiffness matrix
     to the representation in Voigt notation. Checks symmetry in that process.
@@ -274,6 +274,7 @@ def full_3x3x3x3_to_Voigt_6x6(C, tol=1e-2, check_symmetry=True):
     Voigt_notation = [(0, 0), (1, 1), (2, 2), (0, 1), (1, 2), (2, 0)]
 
     C = np.asarray(C)
+    C_mag = np.linalg.norm(C)
     Voigt = np.zeros((6,6))
     for i in range(6):
         for j in range(6):
@@ -282,25 +283,25 @@ def full_3x3x3x3_to_Voigt_6x6(C, tol=1e-2, check_symmetry=True):
             Voigt[i,j] = C[k,l,m,n]
             if check_symmetry:
                 # MAJOR SYMMETRY
-                #assert abs(Voigt[i,j]-C[m,n,k,l]) < tol, \
+                #assert abs(Voigt[i,j]-C[m,n,k,l])/C_mag < tol, \
                 #    '1 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                 #    .format(i, j, Voigt[i,j], m, n, k, l, C[m,n,k,l])
-                assert abs(Voigt[i,j]-C[l,k,m,n]) < tol, \
+                assert abs(Voigt[i,j]-C[l,k,m,n])/C_mag < tol, \
                     '2 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                     .format(i, j, Voigt[i,j], l, k, m, n, C[l,k,m,n])
-                assert abs(Voigt[i,j]-C[k,l,n,m]) < tol, \
+                assert abs(Voigt[i,j]-C[k,l,n,m])/C_mag < tol, \
                     '3 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                     .format(i, j, Voigt[i,j], k, l, n, m, C[k,l,n,m])
-                #assert abs(Voigt[i,j]-C[m,n,l,k]) < tol, \
+                #assert abs(Voigt[i,j]-C[m,n,l,k])/C_mag < tol, \
                 #    '4 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                 #    .format(i, j, Voigt[i,j], m, n, l, k, C[m,n,l,k])
-                #assert abs(Voigt[i,j]-C[n,m,k,l]) < tol, \
+                #assert abs(Voigt[i,j]-C[n,m,k,l])/C_mag < tol, \
                 #    '5 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                 #    .format(i, j, Voigt[i,j], n, m, k, l, C[n,m,k,l])
-                assert abs(Voigt[i,j]-C[l,k,n,m]) < tol, \
+                assert abs(Voigt[i,j]-C[l,k,n,m])/C_mag < tol, \
                     '6 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                     .format(i, j, Voigt[i,j], l, k, n, m, C[l,k,n,m])
-                #assert abs(Voigt[i,j]-C[n,m,l,k]) < tol, \
+                #assert abs(Voigt[i,j]-C[n,m,l,k])/C_mag < tol, \
                 #    '7 Voigt[{},{}] = {}, C[{},{},{},{}] = {}' \
                 #    .format(i, j, Voigt[i,j], n, m, l, k, C[n,m,l,k])
 
@@ -320,7 +321,7 @@ def rotateStress(sigma,Q):
     sigma = np.reshape(sigma, (3,3))
     sigma = np.matmul(Q,np.matmul(sigma,Qinv))
     # Switch Voigt notation to match svFSI
-    if not is_symmetric(sigma):
+    if not is_symmetric(sigma/np.linalg.norm(sigma)):
         print(sigma)
         raise ValueError("Sigma is not symmetric!")
     sigma = np.array([sigma[0,0],sigma[1,1],sigma[2,2],sigma[0,1],sigma[1,2],sigma[2,0]])
@@ -329,7 +330,7 @@ def rotateStress(sigma,Q):
 def is_pos_def(x):
     return np.all(np.linalg.eigvals(x) > 0)
 
-def is_symmetric(a, tol=1e-2):
+def is_symmetric(a, tol=1e-4):
     return np.all(np.abs(a-a.T) < tol)
 
 def rotateStiffness(DD,Q):
@@ -341,7 +342,7 @@ def rotateStiffness(DD,Q):
 
     CC = rotate_elastic_constants(CC,Q)
 
-    if not is_symmetric(CC):
+    if not is_symmetric(CC/np.linalg.norm(CC)):
         print(CC)
         raise ValueError("CC is not symmetric!")
     """

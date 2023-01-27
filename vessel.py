@@ -53,6 +53,7 @@ class Vessel():
         self.segmentationName = kwargs.get("segmentationName", None)
         self.estimateOuterSegmentation = kwargs.get("estimateOuterSegmentation",False)
         self.thicknessRatio = kwargs.get("thicknessRatio",0.1)
+        self.adaptiveMesh = kwargs.get("adaptiveMesh",False)
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -123,24 +124,36 @@ class Vessel():
         return
 
     def runSolid(self):
+        os.system('rm -rf '+self.resultDir +'/*')
         if self.timeIter == 0 and self.timeStep == 0:
             os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_mm.mfs")
         else:
             os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")
+        with open(self.resultDir+'/histor.dat') as f:
+            if 'NaN' in f.read():
+                raise RuntimeError("Simulation has NaN!")
         print("Solid simulation finished.")
 
         return
 
     def runFluid(self):
+        os.system('rm -rf '+self.resultDir +'/*')
         os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_fluid.mfs")
+        with open(self.resultDir+'/histor.dat') as f:
+            if 'NaN' in f.read():
+                raise RuntimeError("Simulation has NaN!")
         print("Fluid simulation finished.")
         return
 
     def runFluidSolid(self):
+        os.system('rm -rf '+self.resultDir +'/*')
         if self.timeIter == 0 and self.timeStep == 0:
             os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_mm.mfs")
         else:
             os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_aniso.mfs")
+        with open(self.resultDir+'/histor.dat') as f:
+            if 'NaN' in f.read():
+                raise RuntimeError("Simulation has NaN!")
         print("FSI simulation finished.")
 
         return
@@ -149,7 +162,7 @@ class Vessel():
         if self.vesselType == "cylinder":
             self.vesselReference = self.initializeCylinder()
             self.estimateIterfaceResult()
-        if self.vesselType == "segmentation":
+        elif self.vesselType == "segmentation":
             self.vesselReference = self.initializeSegmentation()
             self.estimateIterfaceResult()
         else:
@@ -324,7 +337,7 @@ class Vessel():
 
     def appendIterfaceResult(self):
         """
-        TODO
+        Add results of fluid simulation
         """
         numCells = self.vesselReference.GetNumberOfCells()
 
@@ -363,8 +376,20 @@ class Vessel():
 
     def estimateIterfaceResult(self):
         """
-        TODO
+        Estimates the wall shear stress and assigns pressure without
+        fluid simulation result
         """
+
+        # Calculate slice centers
+        centers = np.zeros((self.numLen+1,3))
+        inner = thresholdModel(self.vesselReference.extract_surface(), 'InnerRegionID',0.5,1.5)
+        numInnerPts = inner.GetNumberOfPoints()
+        for q in range(numInnerPts):
+            pointCoordinate = np.array(inner.GetPoint(q)) + np.array(inner.GetPointData().GetArray("displacements").GetTuple3(q))
+            pointSlice = int(inner.GetPointData().GetArray('sliceIds').GetTuple1(q))
+            centers[pointSlice] = centers[pointSlice] + pointCoordinate/(self.numCirc)
+
+
         numCells = self.vesselReference.GetNumberOfCells()
 
         for q in range(numCells):
@@ -378,7 +403,7 @@ class Vessel():
             for p in range(cellPts.GetNumberOfIds()):
                 ptId = cellPts.GetId(p)
                 if self.vesselReference.GetPointData().GetArray('InnerRegionID').GetTuple1(ptId) == 1:
-                    fluidCenter = self.vesselReference.GetPointData().GetArray('center').GetTuple3(ptId)
+                    fluidCenter = centers[int(self.vesselReference.GetPointData().GetArray('sliceIds').GetTuple1(ptId))]
                     fluidCoordinate = np.array(self.vesselReference.GetPoint(ptId)) + np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(ptId))
                     pointRadius = np.linalg.norm(fluidCoordinate - fluidCenter)
                     self.vesselReference.GetPointData().GetArray('Pressure').SetTuple1(ptId,self.outletPressure)
@@ -588,7 +613,7 @@ class Vessel():
         outerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         proximalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
-        centers = np.zeros(((self.numCirc+1)*(self.numLen+1)*(self.numRad+1),3))
+        sliceIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
 
         proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
         distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
@@ -608,16 +633,23 @@ class Vessel():
 
         e_ma = np.zeros((self.numCirc*self.numLen*self.numRad,98))
 
+        aFac = 0.5
+        
         for i in range(self.numLen+1):
             for j in range(self.numCirc+1):
                 for k in range(self.numRad+1):
                     xPt = (self.radius + self.thickness*k/self.numRad)*np.cos(2.0*j*np.pi/self.numCirc)
                     yPt = (self.radius + self.thickness*k/self.numRad)*np.sin(2.0*j*np.pi/self.numCirc)
-                    #zPt = -(1 - 2.0*i/(self.numLen))/abs(1 - 2.0*i/(self.numLen))*length*0.5*(np.exp(2.0*abs(1 - 2.0*i/(self.numLen)))-1.0)/(np.exp(2.0)-1.0)
-                    zPt = self.length*i/self.numLen - self.length/2.0
+                    if self.adaptiveMesh:
+                        if self.length*i/self.numLen - self.length/2.0 == 0:
+                            zPt = 0.0
+                        else:
+                            zPt = -(1 - 2.0*i/(self.numLen))/abs(1 - 2.0*i/(self.numLen))*self.length*0.5*(np.exp(aFac*abs(1 - 2.0*i/(self.numLen)))-1.0)/(np.exp(aFac)-1.0)
+                    else:
+                        zPt = self.length*i/self.numLen - self.length/2.0
                     structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
                     points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = [xPt, yPt, zPt]
-                    centers[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] =  [0,0,zPt]
+                    sliceIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] =  i
 
 
         for i in range(self.numLen):
@@ -626,7 +658,13 @@ class Vessel():
 
                     xPt = np.cos(2.0*(j+0.5)*np.pi/self.numCirc)
                     yPt = np.sin(2.0*(j+0.5)*np.pi/self.numCirc)
-                    zPt = self.length*(i+0.5)/self.numLen - self.length/2.0
+                    if self.adaptiveMesh:
+                        if self.length*(i+0.5)/self.numLen - self.length/2.0 == 0:
+                            zPt = 0.0
+                        else:
+                            zPt = -(1 - 2.0*(i+0.5)/(self.numLen))/abs(1 - 2.0*(i+0.5)/(self.numLen))*self.length*0.5*(np.exp(aFac*abs(1 - 2.0*(i+0.5)/(self.numLen)))-1.0)/(np.exp(aFac)-1.0)
+                    else:
+                        zPt = self.length*(i+0.5)/self.numLen - self.length/2.0
 
                     v_r = np.array([xPt,yPt,0])
                     v_t = np.array([-yPt,xPt,0])
@@ -679,7 +717,7 @@ class Vessel():
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="GlobalElementID"))
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="CellStructureID"))
         vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="varWallProps"))
-        vol.GetPointData().AddArray(pv.convert_array((centers).astype(float),name="center"))
+        vol.GetPointData().AddArray(pv.convert_array((sliceIds).astype(int),name="sliceIds"))
 
         #Exchange these to gauss point quantities
         #Matrices/arrays
@@ -794,7 +832,7 @@ class Vessel():
         outerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         proximalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
-        centers = np.zeros(((self.numCirc+1)*(self.numLen+1)*(self.numRad+1),3))
+        sliceIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
 
         proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
         distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
@@ -818,7 +856,7 @@ class Vessel():
             for j in range(self.numCirc+1):
                 for k in range(self.numRad+1):
                     center = np.mean(ctgrPtsInner[i],axis=0)
-                    centers[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = center
+                    sliceIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i
                     if not self.estimateOuterSegmentation:
                         xPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,0] - ctgrPtsInner[i,j%self.numCirc,0]) + ctgrPtsInner[i,j%self.numCirc,0]
                         yPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,1] - ctgrPtsInner[i,j%self.numCirc,1]) + ctgrPtsInner[i,j%self.numCirc,1]
@@ -830,9 +868,6 @@ class Vessel():
                         xPt = (k/self.numRad)*(p_thickness*p_v_r[0]) + ctgrPtsInner[i,j%self.numCirc,0]
                         yPt = (k/self.numRad)*(p_thickness*p_v_r[1]) + ctgrPtsInner[i,j%self.numCirc,1]
                         zPt = (k/self.numRad)*(p_thickness*p_v_r[2]) + ctgrPtsInner[i,j%self.numCirc,2]
-
-
-
                     structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
                     points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = [xPt, yPt, zPt]
 
@@ -920,10 +955,10 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array((innerIds).astype(int),name="InnerRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((outerIds).astype(int),name="OuterRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((structureIds).astype(int),name="StructureID"))
-        vol.GetPointData().AddArray(pv.convert_array((centers).astype(float),name="center"))
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="GlobalElementID"))
         vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="CellStructureID"))
         vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="varWallProps"))
+        vol.GetPointData().AddArray(pv.convert_array((sliceIds).astype(int),name="sliceIds"))
 
         #Exchange these to gauss point quantities
         #Matrices/arrays

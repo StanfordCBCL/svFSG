@@ -54,7 +54,7 @@ Add equation: struct {
    #Dilational penalty model: M94
    Penalty parameter: 100000000.0
    Density: 0.0
-   Mass damping: 10000.0
+   Mass damping: 800000.0
 
    LS type: BICGS {
       Preconditioner: Trilinos-BlockJacobi
