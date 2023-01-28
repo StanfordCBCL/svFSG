@@ -29,7 +29,7 @@ class Vessel():
         self.tevg = kwargs.get("tevg", 0)
         self.timeStep = 0
         self.timeIter = 0
-        self.omega = 0.5
+        self.omega = 0.1
         self.inletFlow = kwargs.get("inletFlow", -20)
         self.outletPressure = kwargs.get("outletPressure", 6150)
         self.residual = 1.0
@@ -101,6 +101,11 @@ class Vessel():
         self.updateSolid()
         self.saveSolid()
         self.runSolid()
+        with open(self.resultDir+'/histor.dat') as f:
+            if 'NaN' in f.read():
+                print("Simulation has NaN! Reducing omega.", file=sys.stderr)
+                self.appendReducedResult()
+                return
         self.updateSolidResults()
         self.appendSolidResult()
         return
@@ -128,10 +133,7 @@ class Vessel():
         if self.timeIter == 0 and self.timeStep == 0:
             os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_mm.mfs")
         else:
-            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")
-        with open(self.resultDir+'/histor.dat') as f:
-            if 'NaN' in f.read():
-                raise RuntimeError("Simulation has NaN!")
+            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")                
         print("Solid simulation finished.")
 
         return
@@ -421,6 +423,24 @@ class Vessel():
 
         return
 
+    def appendReducedResult(self):
+
+        numPts = self.vesselReference.GetNumberOfPoints()
+        numCells = self.vesselReference.GetNumberOfCells()
+
+        self.omega = self.omega/2.0
+
+        # Calculate cauchy green tensor
+        for q in range(numPts):
+            rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr").GetTuple3(q))
+            dcurr = np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(q))
+            displacement = dcurr - self.omega*rcurr
+
+            self.vesselReference.GetPointData().GetArray("displacements").SetTuple(q, displacement)
+
+        self.vesselReference = computeGaussValues(self.vesselReference,"displacements")
+
+        return
 
 
     def appendSolidResult(self):
@@ -457,7 +477,9 @@ class Vessel():
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
-                self.omega = 0.5
+                self.omega = 0.1
+        elif self.predictMethod == "reduced":
+            self.predictMethod = "aitken"
 
         # Calculate cauchy green tensor
         for q in range(numPts):
@@ -633,7 +655,7 @@ class Vessel():
 
         e_ma = np.zeros((self.numCirc*self.numLen*self.numRad,98))
 
-        aFac = 0.5
+        aFac = 1.5
         
         for i in range(self.numLen+1):
             for j in range(self.numCirc+1):
