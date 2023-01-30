@@ -103,13 +103,8 @@ def thresholdModel(data,dataName,low,high,extract=True,cell=False):
     else:
         return pv.wrap(t.GetOutput())
 
-def parsePoint(inputData):
+def parsePoint(output_HnS):
 
-    cellId = inputData[0]
-    gaussId = inputData[1]
-    outputDir = inputData[2]
-
-    output_HnS = np.loadtxt(outputDir + '/HnS_out_python_'+str(cellId)+'_'+str(gaussId))
     J_curr =  np.linalg.det(np.reshape(output_HnS[-1,48:57], (3,3)))
     J_target = output_HnS[-1,46]/output_HnS[-1,47]
     # Change in volume from current to target
@@ -196,17 +191,17 @@ def getAneurysmValue(point,radius):
     Get the value of vessel behavior based on point location and radius                                                                                                                                      
     """
     zPt = point[2]
-    vesselValue = 0.65*np.exp(-abs(zPt/(1.5/4.0))**2)
+    vesselValue = 0.65*np.exp(-abs(zPt/(radius*4.0))**2)
     return vesselValue
 
 
-def getTEVGValue(point, radius):
+def getTEVGValue(point, radius, zcenter=0.0):
     """                                                                                                                                                                                                      
     Get the value of vessel behavior based on point location and radius                                                                                                                                      
     """
     value = 0.0
-    if abs(point[2]) <= radius:
-        value = 1.25*(0.5*np.cos((np.pi/radius)*point[2])+0.5) + 0.01
+    if abs(point[2]-zcenter) <= radius:
+        value = 1.25*(0.5*np.cos((np.pi/radius)*(point[2]-zcenter))+0.5) + 0.01
     return value
 
 def rotate_elastic_constants(C, A, tol=1e-4):
@@ -454,7 +449,7 @@ def computeGaussValues(mesh,name):
             J = np.matmul(Nxi,coordinates);
             Nx = np.matmul(np.linalg.inv(J),Nxi);
             gaussN = np.matmul(N,field)
-            gaussNx = np.ravel(np.matmul(Nx,field) + IdM)
+            gaussNx = np.ravel(np.transpose(np.matmul(Nx,field)) + IdM)
             allGaussN[q, g*3:(g+1)*3] = gaussN
             allGaussNx[q, g*9:(g+1)*9] = gaussNx
 
@@ -531,6 +526,12 @@ def alignContours(array1,array2):
             array3 = arrayTemp
 
     return array3
+
+def flipContour(array1):
+
+    array1 = np.flip(array1,axis=0)
+
+    return array1
 
 def interpolateSplineArray(array,numPts = 20,periodic = False,degree=3,redistribute=True):
     """

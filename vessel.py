@@ -20,7 +20,7 @@ class Vessel():
         self.tau_h = None
 
         self.nG = 8
-        self.max_days = kwargs.get("gnrMaxDays", 720)
+        self.max_days = kwargs.get("max_days", 720)
         self.prefix = kwargs.get("prefix", "./")
         self.numRad = kwargs.get("numRad", 4)
         self.numCirc = kwargs.get("numCirc", 12)
@@ -44,7 +44,7 @@ class Vessel():
         self.outputDir = kwargs.get("outputDir","Outputs")
         self.estimateWSS = kwargs.get("estimateWSS", False)
         self.predictMethod = kwargs.get("predictMethod", "aitken")
-        self.gnr_step_size = kwargs.get("gnrStepSize", 1.0)
+        self.gnr_step_size = kwargs.get("gnr_step_size", 1.0)
         self.damping = kwargs.get("damping", 1e4)
         self.penalty = kwargs.get("penalty", 1e7)
         self.startTime = 0.0
@@ -53,7 +53,10 @@ class Vessel():
         self.segmentationName = kwargs.get("segmentationName", None)
         self.estimateOuterSegmentation = kwargs.get("estimateOuterSegmentation",False)
         self.thicknessRatio = kwargs.get("thicknessRatio",0.1)
+        self.constantThickness = kwargs.get("constantThickness",False)
         self.adaptiveMesh = kwargs.get("adaptiveMesh",False)
+        self.rotation_matrix = np.eye(3)
+        self.zcenter = 0.0
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -219,15 +222,11 @@ class Vessel():
         time2 = time.time()
         print("Time to run_vessel: " + str(time2 - time1))
 
+        parse_file = open("parse_array.dat","rb")
+        parse_array = pickle.load(parse_file)
+        parse_file.close()
+
         print("Parsing points...")
-        pool = Pool()
-        # Begin processing
-        output_array = []
-        for output in tqdm(pool.imap(parsePoint,input_array), total=len(input_array)):
-            output_array.append(output)
-        pool.close()
-        pool.join()
-        pool.terminate()
 
         for q in range(numCells):
             stiffness_mem_g = []
@@ -235,7 +234,23 @@ class Vessel():
             J_target_g = []
             J_curr_g = []
             for p in range(self.nG):
-                J_target, J_curr, stiffness, sigma, wss, sigma_inv = output_array[q*self.nG + p]
+
+                output_data = parse_array[q*self.nG + p]
+
+                J_curr =  np.linalg.det(np.reshape(output_data[48:57], (3,3)))
+                J_target = output_data[46]/output_data[47]
+                # Change in volume from current to target
+                # J_di = J_target/J_curr
+                
+                stiffness = output_data[1:37]
+                sigma = output_data[37:46]
+
+                # Dont forget units 
+                stiffness = np.array(stiffness)*10.0
+                sigma = np.array(sigma)*10.0
+
+                sigma_inv = output_data[57]
+                wss = output_data[58]
 
                 stiffness_mem_g = stiffness_mem_g + stiffness.tolist()
                 sigma_mem_g = sigma_mem_g + sigma.tolist()
@@ -478,8 +493,8 @@ class Vessel():
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
                 self.omega = 0.1
-        elif self.predictMethod == "reduced":
-            self.predictMethod = "aitken"
+            if np.abs(self.omega) > 1:
+                self.omega = np.sign(self.omega)
 
         # Calculate cauchy green tensor
         for q in range(numPts):
@@ -805,6 +820,8 @@ class Vessel():
         self.numLen = int(np.max([1,round((self.numLen) / (numSegsInner-1))]) * (numSegsInner-1))
 
         #Align inner data to each other
+        #Flip first contour to prevent negative jacobian (seems necessary on only come ctgrs?)
+        ctgrPtsInner[0] = flipContour(ctgrPtsInner[0])
         for i in range(np.shape(ctgrPtsInner)[0]-1):
             ctgrPtsInner[i+1] = alignContours(ctgrPtsInner[i],ctgrPtsInner[i+1])
 
@@ -837,6 +854,7 @@ class Vessel():
         self.tau_h = nativeIn[13][1]
 
         #Build material array (constant for now)
+
         materialArray = [ nativeIn[7][0],nativeIn[4][0],nativeIn[4][1],nativeIn[4][2],nativeIn[2][0]*10.0,0,0,0,0,0,0,0,0,0,\
                           nativeIn[7][2],nativeIn[5][2],nativeIn[2][4]*10.0,nativeIn[2][5],0,0,0,0,0,0,0,0,0,0,\
                           nativeIn[7][3],nativeIn[5][3],nativeIn[2][6]*10.0,nativeIn[2][7],0,0,0,0,0,0,0,0,0,0,\
@@ -886,12 +904,16 @@ class Vessel():
                     else:
                         p_radius = np.linalg.norm(ctgrPtsInner[i,j%self.numCirc,:] - center)
                         p_v_r = (ctgrPtsInner[i,j%self.numCirc,:] - center)/p_radius
-                        p_thickness = p_radius*self.thicknessRatio
+                        if self.constantThickness:
+                            p_thickness = self.thickness
+                        else:
+                            p_thickness = p_radius*self.thicknessRatio
                         xPt = (k/self.numRad)*(p_thickness*p_v_r[0]) + ctgrPtsInner[i,j%self.numCirc,0]
                         yPt = (k/self.numRad)*(p_thickness*p_v_r[1]) + ctgrPtsInner[i,j%self.numCirc,1]
                         zPt = (k/self.numRad)*(p_thickness*p_v_r[2]) + ctgrPtsInner[i,j%self.numCirc,2]
                     structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
-                    points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = [xPt, yPt, zPt]
+                    pointCoordinate = np.matmul(self.rotation_matrix, np.array([xPt, yPt, zPt]))
+                    points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = pointCoordinate
 
 
         coords=[[0, 1, 0],
@@ -923,15 +945,17 @@ class Vessel():
 
                     v_r = np.mean(cellPts[[1,2,5,6]],axis=0) - np.mean(cellPts[[0,3,4,7]],axis=0)
                     v_r = v_r/np.linalg.norm(v_r)
-                    v_t = np.mean(cellPts[[0,1,2,3]],axis=0) - np.mean(cellPts[[4,5,6,7]],axis=0)
+                    v_t = np.mean(cellPts[[4,5,6,7]],axis=0) - np.mean(cellPts[[0,1,2,3]],axis=0)
                     v_t = v_t/np.linalg.norm(v_t)
-
-                    v_z = np.cross(v_r,v_t)
+                    v_z = np.mean(cellPts[[2,3,6,7]],axis=0) - np.mean(cellPts[[0,1,4,5]],axis=0)
                     v_z = v_z/np.linalg.norm(v_z)
-                    v_t = np.cross(v_z,v_r)
-                    v_t = v_t/np.linalg.norm(v_t)
-                    #v_z = np.mean(cellPts[[1,2,5,6]],axis=0) - np.mean(cellPts[[0,3,4,7]],axis=0)
-                    #v_z = v_z/np.linalg.norm(v_z)
+
+                    v_r = np.cross(v_z,v_t)
+                    v_r = -v_r/np.linalg.norm(v_r)
+                    #v_t = np.cross(v_z,v_r)
+                    #v_t = v_t/np.linalg.norm(v_t)
+                    v_z = np.cross(v_t,v_r)
+                    v_z = -v_z/np.linalg.norm(v_z)
 
                     e_r[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_r
                     e_t[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_t
@@ -963,7 +987,18 @@ class Vessel():
                     solidStressQueryIds[k + j*self.numRad + i*self.numRad*self.numCirc] = j*self.numRad + i*self.numRad*self.numCirc + self.numRad
 
                     if self.tevg:
-                        tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getTEVGValue([xPt,yPt,zPt], self.radius)
+                        tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getTEVGValue([xPt,yPt,zPt], self.radius, self.zcenter)
+                        if tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] > 0:
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,4] = 200000000
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,1] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,2] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,3] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,14] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,28] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,42] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,56] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,70] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,84] = 0
                     if self.aneurysm:
                         aneurysmValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getAneurysmValue([xPt,yPt,zPt], self.radius)
 

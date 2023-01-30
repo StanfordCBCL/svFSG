@@ -29,7 +29,7 @@ extern "C"
 #endif
 int run(char* prefix_char, char* name_char, int restart_arg, int iter_arg, int gnr_arg, int num_days, double step_size,
         double sigma_arg, double tauw_arg, double anysm_arg, double tevg_arg, double F0, double F1, double F2, double F3, double F4,
-        double F5, double F6, double F7, double F8) {
+        double F5, double F6, double F7, double F8, double * out_array) {
 
     //std::cout << string(prefix_char) << std::endl;
     //std::cout << string(name_char) << std::endl;
@@ -163,11 +163,28 @@ int run(char* prefix_char, char* name_char, int restart_arg, int iter_arg, int g
 
         //simulation_vessel.GnR_out.close();
         simulation_vessel.HnS_out.close();
+        
+        out_array[0] = simulation_vessel.s;   
+        for (int i = 0; i < 36; i++) {
+            out_array[i+1] = simulation_vessel.CC[i];
+        }
+        for (int i = 0; i < 9; i++){
+            out_array[i+37] = simulation_vessel.sigma[i];
+        }
+        out_array[46] = simulation_vessel.rhoR[simulation_vessel.sn];
+        out_array[47] = simulation_vessel.rho[simulation_vessel.sn];
+        for (int i = 0; i < 9; i++){
+            out_array[i+48] = simulation_vessel.F_s[9*simulation_vessel.sn+i];
+        }
+        out_array[57] = simulation_vessel.sigma_inv;
+        out_array[58] = simulation_vessel.bar_tauw;
 
     } catch(std::exception& e) {
         cout << e.what() << "\n";
         return 1;
     }
+
+
 
     return 0;
 

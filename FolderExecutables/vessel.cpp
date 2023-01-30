@@ -10,6 +10,7 @@
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_multiroots.h>
+#include <limits>
 
 #include "vessel.h"
 #include "functions.h"
@@ -2163,7 +2164,7 @@ void vessel::printOutputsHandshake() {
     //HnS_out <<  CC << " " << J_di << " " << sigma << "\n";
     //HnS_out.flush();
 
-    HnS_out<< std::setprecision(9)
+    HnS_out<< std::setprecision(6)
     << s << " " << CC  << " " << sigma << " " << rhoR[sn]<< " " << rho[sn]
     << " " << F_s[9*sn+0]
     << " " << F_s[9*sn+1]
@@ -2325,8 +2326,7 @@ void vessel::load() {
 void vessel::save() {
     std::ofstream ar;
     ar.open(file_name);
-    ar.precision(20);
-
+    ar.precision(std::numeric_limits<double>::max_digits10);
     ar << nts << "\n";
     ar << dt << "\n";
     ar << sn << "\n";
