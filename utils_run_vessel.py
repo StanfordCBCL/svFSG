@@ -33,8 +33,6 @@ if rank == 0:
     cvessel_file.close()
     numData = len(input_array)
 
-    print("Initializing data array of size: " + str(np.shape(input_array)))
-
     split = np.array_split(input_array,size) #Split input array by the number of available cores
 
 else:
@@ -42,8 +40,6 @@ else:
     split = None
 
 data = comm.scatter(split,root=0)
-
-print("Rank " + str(rank) + " has data size " + str(np.shape(data)))
 
 for i in range(0,np.shape(data)[0],1):
 
@@ -54,11 +50,10 @@ for i in range(0,np.shape(data)[0],1):
     prefix = data[i].prefix.encode('ascii')
     suffix = data[i].name.encode('ascii')
 
-    print("Rank " + str(rank) + " Check 1")
     buffersize = 128 * 1024
     allocation = ctypes.create_string_buffer(buffersize)
 
-    savestring = run(loadstring, prefix, suffix, data[i].restart, data[i].iteration, data[i].simulate, \
+    savestring = run(loadstring, prefix, suffix, data[i].restart, 0, data[i].simulate, \
                     data[i].num_days, data[i].step_size, data[i].sigma_inv, data[i].tauw_wss, \
                     data[i].aneurysm, data[i].tevg, data[i].F[0], data[i].F[1], data[i].F[2], \
                     data[i].F[3], data[i].F[4], data[i].F[5], data[i].F[6], data[i].F[7], \

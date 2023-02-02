@@ -46,8 +46,6 @@ const char* run(char* loadstring_char, char* prefix_char, char* name_char, int r
     string savestring;
     vector<double> F_s = {F0,F1,F2,F3,F4,F5,F6,F7,F8};
 
-    std::cout << "running " << name_arg << std::endl;
-
     //std::cout << "Restarting simulation: " << restart_arg << "\n";
     //std::cout << "Filename suffix: " << name_arg << "\n";
 

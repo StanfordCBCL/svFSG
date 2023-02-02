@@ -248,6 +248,10 @@ class Vessel():
         self.cvessels = pickle.load(cvessel_file)
         cvessel_file.close()
 
+        for vess in self.cvessels:
+            print(vess.name)
+            print(vess.savestring[:12])
+
         print("Parsing points...")
 
         for q in range(numCells):
