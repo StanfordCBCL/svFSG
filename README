@@ -1,1 +1,14 @@
 Python implementation of fluid-solid-growth framework using SimVascular and C++ executable
+
+Modules needed to run:
+
+ml openblas
+ml openmpi
+ml boost
+ml mesa
+ml gcc
+ml gsl
+ml py-numpy
+ml py-scipy
+
+And gauss point variable wall property version of svFSI
