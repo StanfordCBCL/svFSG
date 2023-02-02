@@ -49,11 +49,11 @@ for i in range(0,np.shape(data)[0],1):
     loadstring = data[i].savestring.encode('ascii')
     prefix = data[i].prefix.encode('ascii')
     suffix = data[i].name.encode('ascii')
-
+    
     buffersize = 128 * 1024
     allocation = ctypes.create_string_buffer(buffersize)
 
-    savestring = run(loadstring, prefix, suffix, data[i].restart, 0, data[i].simulate, \
+    savestring = run(loadstring, prefix, suffix, data[i].restart, data[i].iteration, data[i].simulate, \
                     data[i].num_days, data[i].step_size, data[i].sigma_inv, data[i].tauw_wss, \
                     data[i].aneurysm, data[i].tevg, data[i].F[0], data[i].F[1], data[i].F[2], \
                     data[i].F[3], data[i].F[4], data[i].F[5], data[i].F[6], data[i].F[7], \
