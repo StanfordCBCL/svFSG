@@ -1,5 +1,6 @@
 from utils import *
 import time
+from cvessel import cvessel
 
 # This class provides functionality to running an FSG simulation
 class Vessel():
@@ -29,7 +30,7 @@ class Vessel():
         self.tevg = kwargs.get("tevg", 0)
         self.timeStep = 0
         self.timeIter = 0
-        self.omega = 0.1
+        self.omega = 0.5
         self.inletFlow = kwargs.get("inletFlow", -20)
         self.outletPressure = kwargs.get("outletPressure", 6150)
         self.residual = 1.0
@@ -49,7 +50,7 @@ class Vessel():
         self.penalty = kwargs.get("penalty", 1e7)
         self.startTime = 0.0
         self.currTime = 0.0
-        self.tolerance = kwargs.get("tolerance", 1e-3)
+        self.tolerance = kwargs.get("tolerance", 1e-2)
         self.segmentationName = kwargs.get("segmentationName", None)
         self.estimateOuterSegmentation = kwargs.get("estimateOuterSegmentation",False)
         self.thicknessRatio = kwargs.get("thicknessRatio",0.1)
@@ -57,6 +58,13 @@ class Vessel():
         self.adaptiveMesh = kwargs.get("adaptiveMesh",False)
         self.rotation_matrix = np.eye(3)
         self.zcenter = 0.0
+        self.nq = 10
+        self.iq_eps = 1e-12
+        self.mat_W = []
+        self.mat_V = []
+        self.displacements_i = []
+        self.displacements_k = []
+        self.cvessels = []
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -122,10 +130,10 @@ class Vessel():
 
     def checkResidual(self):
         tolTypes = ["disp", "sigma_inv", "wss", "jac"]
-        tol1 = np.max(np.linalg.norm(self.vesselReference.get_array('residual_curr'),axis=1))
+        tol1 = 10.0*np.max(np.linalg.norm(self.vesselReference.get_array('residual_curr'),axis=1))
         tol2 = np.max(abs((self.vesselReference.get_array('inv_prev')-self.vesselReference.get_array('inv_curr'))/self.sigma_h))
         tol3 = np.max(abs((self.vesselReference.get_array('wss_prev')-self.vesselReference.get_array('wss_curr'))/self.tau_h))
-        tol4 = np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0)/10.0)
+        tol4 = np.max(abs(self.vesselReference.get_array('varWallProps')[:,37::45] - 1.0))
         tolVals = np.array([tol1,tol2,tol3,tol4])
         self.residual = np.max(tolVals)
         self.residualType = tolTypes[tolVals.argmax()]
@@ -173,6 +181,9 @@ class Vessel():
         else:
             print("TODO: Implement new initializer")
         self.saveReference()
+
+        self.cvessels = [cvessel() for i in range(self.vesselReference.GetNumberOfCells() * self.nG)]
+
         return
 
     def updateMaterial(self):
@@ -204,17 +215,28 @@ class Vessel():
                 defGrad_mem_g = np.reshape(defGrad_mem_g,9)
 
                 #Queue process
-                input_array.append([q, p,self.outputDir, self.timeStep,self.timeIter,simulate,self.max_days,self.gnr_step_size,sigma_inv,wss,aneurysmValue,tevgValue,\
-                                   defGrad_mem_g[0],defGrad_mem_g[1],defGrad_mem_g[2],defGrad_mem_g[3],\
-                                   defGrad_mem_g[4],defGrad_mem_g[5],defGrad_mem_g[6],defGrad_mem_g[7],defGrad_mem_g[8]])
+
+                self.cvessels[q*self.nG + p].prefix = self.outputDir
+                self.cvessels[q*self.nG + p].name = 'python_'+str(q)+'_'+str(p)
+                self.cvessels[q*self.nG + p].restart = self.timeStep
+                self.cvessels[q*self.nG + p].iteration = self.timeIter
+                self.cvessels[q*self.nG + p].simulate = simulate
+                self.cvessels[q*self.nG + p].num_days = self.max_days
+                self.cvessels[q*self.nG + p].step_size = self.gnr_step_size
+                self.cvessels[q*self.nG + p].sigma_inv = sigma_inv
+                self.cvessels[q*self.nG + p].tevg = tevgValue
+                self.cvessels[q*self.nG + p].aneurysm = aneurysmValue
+
+                for i in range(9):
+                    self.cvessels[q*self.nG + p].F[i] = defGrad_mem_g[i]
 
                 defGrad_mem = np.hstack((defGrad_mem,defGrad_mem_g))
 
             self.vesselReference.GetCellData().GetArray('defGrad_mem').SetTuple(q,defGrad_mem)
 
-        input_file = open("input_array.dat","wb")
-        pickle.dump(input_array, input_file)
-        input_file.close()
+        cvessel_file = open("cvessel_array.dat","wb")
+        pickle.dump(self.cvessels, cvessel_file)
+        cvessel_file.close()
 
         print("Running points...")
         time1 = time.time()
@@ -222,9 +244,9 @@ class Vessel():
         time2 = time.time()
         print("Time to run_vessel: " + str(time2 - time1))
 
-        parse_file = open("parse_array.dat","rb")
-        parse_array = pickle.load(parse_file)
-        parse_file.close()
+        cvessel_file = open("cvessel_array.dat","rb")
+        self.cvessels = pickle.load(cvessel_file)
+        cvessel_file.close()
 
         print("Parsing points...")
 
@@ -235,13 +257,11 @@ class Vessel():
             J_curr_g = []
             for p in range(self.nG):
 
-                output_data = parse_array[q*self.nG + p]
+                output_data = self.cvessels[q*self.nG + p].out_array
 
                 J_curr =  np.linalg.det(np.reshape(output_data[48:57], (3,3)))
                 J_target = output_data[46]/output_data[47]
-                # Change in volume from current to target
-                # J_di = J_target/J_curr
-                
+
                 stiffness = output_data[1:37]
                 sigma = output_data[37:46]
 
@@ -331,8 +351,7 @@ class Vessel():
 
     def saveReference(self):
         save_data(self.prefix + 'meshIterations/mesh_' + str(self.timeStep) + '_' + str(self.timeIter) + '.vtu', self.vesselReference)
-        if self.timeIter == 0:
-            save_data(self.prefix + 'meshResults/mesh_' + str(self.timeStep) + '.vtu', self.vesselReference)
+        save_data(self.prefix + 'meshResults/mesh_' + str(self.timeStep) + '.vtu', self.vesselReference)
         return
 
 
@@ -458,6 +477,21 @@ class Vessel():
         return
 
 
+    def predictSolidResult(self):
+        self.displacements_k = []
+        self.mat_V = []
+        self.mat_W = []
+        if self.timeStep == 1:
+            self.displacements_k += [2.0*self.displacements_i[-1] - self.displacements_i[-2]]
+        if self.timeStep > 1:
+            self.displacements_k += [3.0 * displacements_i[-1] - 3.0 * self.displacements_i[-2] + self.displacements_i[-3]]
+
+        self.point_data.set_array(self.displacements_k[0], 'displacements')
+
+        return
+
+
+
     def appendSolidResult(self):
         pointLocatorSolid = vtk.vtkPointLocator()
         pointLocatorSolid.SetDataSet(self.solidResult)
@@ -483,6 +517,8 @@ class Vessel():
 
             self.vesselReference.GetPointData().GetArray("residual_curr").SetTuple(q, residual_curr)
 
+        self
+
         if self.predictMethod == "none":
             self.omega = 1.0
         elif self.predictMethod == "aitken":
@@ -492,9 +528,44 @@ class Vessel():
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
+                self.omega = 0.5
+            if self.omega > 1:
+                self.omega = 1.0
+            elif self.omega < 0.1:
                 self.omega = 0.1
-            if np.abs(self.omega) > 1:
-                self.omega = np.sign(self.omega)
+        elif self.predictMethod == "iqnils":
+            print("TODO: Implement iqnils method")
+            self.omega = 1.0
+            # TODO
+            """
+            # trim to max number of considered vectors
+            self.mat_V = self.mat_V[-self.nq:]
+            self.mat_W = self.mat_W[-self.nq:]
+            # remove linearly dependent vectors
+            while True:
+                # QR decomposition
+                qq, rr = np.linalg.qr(np.array(self.mat_V[:nq]).T)
+
+                # tolerance for redundant vectors
+                i_eps = np.where(
+                    np.abs(np.diag(rr)) < self.iq_eps
+                )[0]
+                if not np.any(i_eps):
+                    break
+
+                print("Filtering " + str(len(i_eps)) + " time steps")
+                for i in reversed(i_eps):
+                    self.mat_V.pop(i)
+                    self.mat_W.pop(i)
+
+            # solve for coefficients
+            bb = np.linalg.solve(rr.T, -np.dot(np.array(self.mat_V), self.res[-1]))
+            cc = np.linalg.solve(rr, bb)
+
+            # update
+            vec_new = dtk + np.dot(np.array(self.mat_W).T, cc)
+            """
+
 
         # Calculate cauchy green tensor
         for q in range(numPts):

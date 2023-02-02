@@ -1,6 +1,7 @@
 // vessel.h
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <cstring>
 #include <cmath>
 #include <string>
@@ -2213,7 +2214,7 @@ void vessel::printTEVGOutputs() {
     return;
 }
 
-void vessel::load() {
+void vessel::load(string loadstring) {
     std::ifstream ar;
     ar.open(file_name);
     ar >> nts;
@@ -2323,9 +2324,8 @@ void vessel::load() {
 
 }
 
-void vessel::save() {
-    std::ofstream ar;
-    ar.open(file_name);
+string vessel::save() {
+    std::ostringstream ar;
     ar.precision(std::numeric_limits<double>::max_digits10);
     ar << nts << "\n";
     ar << dt << "\n";
@@ -2428,6 +2428,6 @@ void vessel::save() {
     ar << J_di << "\n";
     ar << P_prev << "\n";
 
-    ar.close();
+    return ar.str();
     //std::cout << "Saved vessel." << "\n";
 };

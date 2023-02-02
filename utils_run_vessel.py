@@ -1,89 +1,87 @@
 from mpi4py import MPI
 import numpy as np
 import pickle
+from cvessel import cvessel
 import os
-from ctypes import cdll
-from ctypes import c_char_p
-from ctypes import c_int
-from ctypes import c_double
+import ctypes
+import ctypes.util
 
-lib = cdll.LoadLibrary('./libgnr.so')
+
+lib = ctypes.cdll.LoadLibrary('./libgnr.so')
 run = lib.run
-run.argtypes = [c_char_p, c_char_p, c_int, c_int, c_int, c_int, \
-                c_double,c_double,c_double, c_double, c_double, \
-                c_double,c_double,c_double,c_double,c_double, \
-                c_double,c_double,c_double,c_double]
-#run(dir_prefix.encode('ascii'), filename.encode('ascii'),restart_arg,iter_arg,gnr_arg,num_days,step_size,sigma_arg,tauw_arg,anysm_arg,tevg_arg,F0, F1, F2, F3, F4,F5, F6, F7, F8)
-run.restype = c_int
+run.restype = ctypes.c_char_p #ctypes.POINTER(ctypes.c_char)
+run.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, \
+                ctypes.c_double,ctypes.c_double,ctypes.c_double, ctypes.c_double, ctypes.c_double, \
+                ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double, \
+                ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double]
+
+free = lib.free
+free.restype = ctypes.c_void_p
+free.argtypes = (ctypes.c_char_p,)
+libc = ctypes.CDLL(ctypes.util.find_library('c'))
+libc.free.argtypes = (ctypes.c_void_p,)
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size() # new: gives number of ranks in comm
 rank = comm.Get_rank()
 
-input_file = open("input_array.dat","rb")
-input_array = pickle.load(input_file)
-input_file.close()
-numData = len(input_array)
 
 if rank == 0:
 
+    cvessel_file = open("cvessel_array.dat","rb")
+    input_array = np.array(pickle.load(cvessel_file))
+    cvessel_file.close()
+    numData = len(input_array)
 
-    array_list = np.arange(numData)
-    output_array = np.zeros([numData,59]) #Create output array of same size
-    split = np.array_split(array_list,size) #Split input array by the number of available cores
+    print("Initializing data array of size: " + str(np.shape(input_array)))
 
-    split_sizes = []
-
-    for i in range(0,len(split),1):
-        split_sizes = np.append(split_sizes, len(split[i]))
-
-    split_sizes_input = split_sizes
-    displacements_input = np.insert(np.cumsum(split_sizes_input),0,0)[0:-1]
-
-    split_sizes_output = split_sizes*59
-    displacements_output = np.insert(np.cumsum(split_sizes_output),0,0)[0:-1]
-
+    split = np.array_split(input_array,size) #Split input array by the number of available cores
 
 else:
 #Create variables on other cores
-    split_sizes_input = None
-    displacements_input = None
-    split_sizes_output = None
-    displacements_output = None
     split = None
-    array_list = None
-    output_array = None
 
+data = comm.scatter(split,root=0)
 
-split = comm.bcast(split, root=0) #Broadcast split array to other cores
-split_sizes = comm.bcast(split_sizes_input, root = 0)
-displacements = comm.bcast(displacements_input, root = 0)
-split_sizes_output = comm.bcast(split_sizes_output, root = 0)
-displacements_output = comm.bcast(displacements_output, root = 0)
+print("Rank " + str(rank) + " has data size " + str(np.shape(data)))
 
-output_chunk = np.array([0] * len(split[rank])) #Create array to receive subset of data on each core, where rank specifies the core
-comm.Scatterv([array_list,split_sizes_input, displacements_input,MPI.DOUBLE],output_chunk,root=0)
+for i in range(0,np.shape(data)[0],1):
 
-output = np.zeros([len(output_chunk),59]) #Create output array on each core
-
-for i in range(0,np.shape(output_chunk)[0],1):
-    inputData = input_array[output_chunk[i]]
-    out_array_type = c_double * 59  # equiv. to C double[3] type
+    out_array_type = ctypes.c_double * 59  # equiv. to C double[3] type
     out_array = out_array_type(*([0]*59))        # equiv. to double arr[3] = {...} instance
-    prefix = inputData[2].encode('ascii')
-    suffix = ('python_'+str(inputData[0])+'_'+str(inputData[1])).encode('ascii')
-    run(prefix, suffix, inputData[3], inputData[4], inputData[5],inputData[6], inputData[7],\
-        inputData[8], inputData[9], inputData[10], inputData[11], inputData[12], inputData[13],\
-        inputData[14],inputData[15],inputData[16],inputData[17],inputData[18], inputData[19],\
-        inputData[20],out_array)
-    output[i] = np.array(out_array)
+
+    loadstring = data[i].savestring.encode('ascii')
+    prefix = data[i].prefix.encode('ascii')
+    suffix = data[i].name.encode('ascii')
+
+    print("Rank " + str(rank) + " Check 1")
+    buffersize = 128 * 1024
+    allocation = ctypes.create_string_buffer(buffersize)
+
+    savestring = run(loadstring, prefix, suffix, data[i].restart, data[i].iteration, data[i].simulate, \
+                    data[i].num_days, data[i].step_size, data[i].sigma_inv, data[i].tauw_wss, \
+                    data[i].aneurysm, data[i].tevg, data[i].F[0], data[i].F[1], data[i].F[2], \
+                    data[i].F[3], data[i].F[4], data[i].F[5], data[i].F[6], data[i].F[7], \
+                    data[i].F[8], out_array, allocation, buffersize)
+
+    if savestring is None:
+        raise RuntimeError('No return from vessel executable. Check return buffer size in utils_run_vessel.py')
+
+    data[i].out_array = np.array(out_array)
+    data[i].savestring = savestring.decode("utf-8")
+
 
 comm.Barrier()
 
-comm.Gatherv(output,[output_array,split_sizes_output,displacements_output,MPI.DOUBLE], root=0) #Gather output data together
+output_array = comm.gather(data,root=0)
 
 if rank == 0:
-    parse_file = open("parse_array.dat","wb")
-    pickle.dump(output_array, parse_file)
-    parse_file.close()
+    cvessel_array = []
 
+    for i in output_array:
+        for j in i:
+            cvessel_array.append(j)
+
+    cvessel_file = open("cvessel_array.dat","wb")
+    pickle.dump(cvessel_array, cvessel_file)
+    cvessel_file.close()

@@ -148,8 +148,8 @@ public:
     vessel(); //Default constructor
     //Vessel(string file_name); //File name constructor ***ELS USE DELEGATING CONSTRUCTOR***
     //Vessel(string file_name, string vessel_type); //File name and type constructor ***ELS USE DELEGATING CONSTRUCTOR***
-    void load();
-    void save();
+    void load(string);
+    string save();
     void print();
     void printTEVGOutputs();
     void printNativeOutputs();
