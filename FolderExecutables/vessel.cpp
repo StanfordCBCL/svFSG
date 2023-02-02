@@ -80,53 +80,6 @@ std::ifstream& operator>>(std::ifstream& in, vector<T>& v) {
     return in; 
 }
 
-
-// C++ template to print vector container elements 
-std::ostream& operator<<(std::ostream& os, vessel const &v) {
-    os << v.nts << "\n";
-    os << v.dt << "\n";
-    os << v.sn << "\n";
-    os << v.s << "\n";
-    os << v.A_h << "\n";
-    os << v.B_h << "\n";
-    os << v.H_h << "\n";
-    os << v.A_mid_h << "\n";
-    os << v.a_h << "\n";
-    os << v.b_h << "\n";
-    os << v.h_h << "\n";
-    os << v.a_mid_h << "\n";
-    os << v.lambda_z_h << "\n";
-    os << v.a << "\n";
-    os << v.a_mid << "\n";
-    os << v.b << "\n";
-    os << v.h << "\n";
-    os << v.A << "\n";
-    os << v.A_mid << "\n";
-    os << v.B << "\n";
-    os << v.H << "\n";
-    os << v.lambda_z_pre << "\n";
-    os << v.n_alpha << "\n";
-    os << v.n_pol_alpha << "\n";
-    os << v.n_native_alpha << "\n";
-    os << v.alpha_infl << "\n";
-    os << v.c_alpha_h << "\n";
-    os << v.eta_alpha_h << "\n";
-    os << v.g_alpha_h << "\n";
-    os << v.G_alpha_h << "\n";
-    os << v.phi_alpha_h << "\n";
-    os << v.rhoR_alpha_h << "\n";
-    os << v.mR_alpha_h << "\n";
-    os << v.k_alpha_h << "\n";
-    os << v.K_sigma_p_alpha_h << "\n";
-    os << v.K_sigma_d_alpha_h << "\n";
-    os << v.K_tauw_p_alpha_h << "\n";
-    os << v.K_tauw_d_alpha_h << "\n";
-    os << v.rho_hat_alpha_h << "\n";
-    os << v.epsilonR_alpha_0 << "\n";
-    os << v.rhoR_h << "\n";
-    return os;
-}
-
 vessel::vessel() { //Default constructor
     vessel_name = "default";
     file_name = "Vs_out";

@@ -192,7 +192,7 @@ class Vessel():
 
         for q in range(numCells):
             sigma_inv = self.vesselReference.GetCellData().GetArray('inv_curr').GetTuple1(q)
-            wss = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
+            tauw_wss = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
             
             simulate = int(self.vesselReference.GetCellData().GetArray('Simulate').GetTuple1(q))
             aneurysmValue = self.vesselReference.GetCellData().GetArray('aneurysmValue').GetTuple1(q)
@@ -224,6 +224,7 @@ class Vessel():
                 self.cvessels[q*self.nG + p].num_days = self.max_days
                 self.cvessels[q*self.nG + p].step_size = self.gnr_step_size
                 self.cvessels[q*self.nG + p].sigma_inv = sigma_inv
+                self.cvessels[q*self.nG + p].tauw_wss = tauw_wss
                 self.cvessels[q*self.nG + p].tevg = tevgValue
                 self.cvessels[q*self.nG + p].aneurysm = aneurysmValue
 
@@ -247,10 +248,6 @@ class Vessel():
         cvessel_file = open("cvessel_array.dat","rb")
         self.cvessels = pickle.load(cvessel_file)
         cvessel_file.close()
-
-        for vess in self.cvessels:
-            print(vess.name)
-            print(vess.savestring[:12])
 
         print("Parsing points...")
 

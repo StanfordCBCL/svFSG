@@ -17,7 +17,7 @@
 #SBATCH --qos=normal
 
 # Number of nodes are you requesting for your job. You can have 24 processors per node
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 
 # Amount of memory you require per node. The default is 4000 MB per node
 #SBATCH --mem=8000
@@ -26,4 +26,4 @@
 #SBATCH --ntasks-per-node=128
 
 # Name of the executable you want to run on the cluster
-python -u driver.py
+python -u run_test.py

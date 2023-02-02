@@ -46,9 +46,9 @@ for i in range(0,np.shape(data)[0],1):
     out_array_type = ctypes.c_double * 59  # equiv. to C double[3] type
     out_array = out_array_type(*([0]*59))        # equiv. to double arr[3] = {...} instance
 
-    loadstring = data[i].savestring.encode('ascii')
-    prefix = data[i].prefix.encode('ascii')
-    suffix = data[i].name.encode('ascii')
+    loadstring = data[i].savestring.encode('utf-8')
+    prefix = data[i].prefix.encode('utf-8')
+    suffix = data[i].name.encode('utf-8')
     
     buffersize = 128 * 1024
     allocation = ctypes.create_string_buffer(buffersize)
@@ -76,7 +76,7 @@ if rank == 0:
     for i in output_array:
         for j in i:
             cvessel_array.append(j)
-
+            
     cvessel_file = open("cvessel_array.dat","wb")
     pickle.dump(cvessel_array, cvessel_file)
     cvessel_file.close()

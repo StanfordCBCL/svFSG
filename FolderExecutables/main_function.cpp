@@ -113,6 +113,7 @@ const char* run(char* loadstring_char, char* prefix_char, char* name_char, int r
 
     simulation_vessel.sigma_inv = sigma_arg;
     simulation_vessel.bar_tauw = tauw_arg;
+
     for (int i = 0; i < 9; i++) {
         simulation_vessel.F_curr[i] = F_s[i];
     }
