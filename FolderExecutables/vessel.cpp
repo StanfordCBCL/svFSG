@@ -20,6 +20,16 @@ using std::string;
 using std::vector;
 using std::cout;
 
+template <typename T>
+// C++ template to print vessel contents
+std::ostringstream& operator<<(std::ostringstream& os, const vector<T>& v) {
+    for (int i = 0; i < v.size(); ++i) { 
+        os << v[i]; 
+        if (i != v.size() - 1) 
+            os << " "; 
+    }
+    return os; 
+}
 
 template <typename T>
 // C++ template to print vessel contents
@@ -30,6 +40,25 @@ std::ostream& operator<<(std::ostream& os, const vector<T>& v) {
             os << " "; 
     }
     return os; 
+}
+
+template <typename T>
+// C++ template to read vector container elements
+std::istringstream& operator>>(std::istringstream& in, vector<T>& v) {
+    T x;
+    char next;
+    int i=0;
+    while(in.get(next))
+    {
+        if (next == '\n')  
+        {    break; }
+    }
+    while ((in.peek()!='\n') && (in>>x))
+    {
+        v[i]=x;
+        i++;
+    }
+    return in; 
 }
 
 template <typename T>
@@ -50,6 +79,7 @@ std::ifstream& operator>>(std::ifstream& in, vector<T>& v) {
     }
     return in; 
 }
+
 
 // C++ template to print vector container elements 
 std::ostream& operator<<(std::ostream& os, vessel const &v) {
@@ -2215,8 +2245,7 @@ void vessel::printTEVGOutputs() {
 }
 
 void vessel::load(string loadstring) {
-    std::ifstream ar;
-    ar.open(file_name);
+    std::istringstream ar(loadstring);
     ar >> nts;
     ar >> dt;
     ar >> sn;
@@ -2317,7 +2346,6 @@ void vessel::load(string loadstring) {
     ar >> Fi_curr;
     ar >> J_di;
     ar >> P_prev;
-    ar.close();
 
     //std::cout << v;
     //std::cout << "Loaded vessel." << "\n";
