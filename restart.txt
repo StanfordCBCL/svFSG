@@ -1,3 +1,0 @@
-rm -rf svDriver.*
-rm -rf results
-sbatch expanse_driver_script
