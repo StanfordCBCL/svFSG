@@ -1,6 +1,8 @@
+import zlib
+import pickle
+
 class cvessel():
     def __init__(self):
-        self.savestring = ""
         self.prefix = ""
         self.name = ""
         self.restart = 0
@@ -14,3 +16,4 @@ class cvessel():
         self.tevg = 0
         self.F = [0]*9
         self.out_array = [0]*59
+        self.savearray = zlib.compress(pickle.dumps([]))

@@ -4,7 +4,7 @@ import pickle
 from cvessel import cvessel
 import os
 import ctypes
-import ctypes.util
+import zlib
 
 
 lib = ctypes.cdll.LoadLibrary('./libgnr.so')
@@ -15,11 +15,6 @@ run.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int,
                 ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double, \
                 ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double]
 
-free = lib.free
-free.restype = ctypes.c_void_p
-free.argtypes = (ctypes.c_char_p,)
-libc = ctypes.CDLL(ctypes.util.find_library('c'))
-libc.free.argtypes = (ctypes.c_void_p,)
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size() # new: gives number of ranks in comm
@@ -27,7 +22,6 @@ rank = comm.Get_rank()
 
 
 if rank == 0:
-
     cvessel_file = open("cvessel_array.dat","rb")
     input_array = np.array(pickle.load(cvessel_file))
     cvessel_file.close()
@@ -44,9 +38,26 @@ data = comm.scatter(split,root=0)
 for i in range(0,np.shape(data)[0],1):
 
     out_array_type = ctypes.c_double * 59  # equiv. to C double[3] type
-    out_array = out_array_type(*([0]*59))        # equiv. to double arr[3] = {...} instance
+    out_array = out_array_type(*([0]*59))  # equiv. to double arr[3] = {...} instance
 
-    loadstring = data[i].savestring.encode('utf-8')
+    savearray = pickle.loads(zlib.decompress(data[i].savearray))
+
+    loadstring = ""
+    array_length = np.shape(savearray)[0]
+    for j in range(array_length):
+        number_length = np.shape(savearray[j])[0]
+        for k in range(number_length):
+            number = savearray[j][k]
+            if number.is_integer():
+                loadstring+=str(int(number))
+            else:
+                loadstring+=str(number)
+            if k != number_length - 1:
+                loadstring+=" "
+        if j != array_length:
+            loadstring+='\n'
+
+    loadstring = loadstring.encode('utf-8')
     prefix = data[i].prefix.encode('utf-8')
     suffix = data[i].name.encode('utf-8')
     
@@ -62,9 +73,11 @@ for i in range(0,np.shape(data)[0],1):
     if savestring is None:
         raise RuntimeError('No return from vessel executable. Check return buffer size in utils_run_vessel.py')
 
-    data[i].out_array = np.array(out_array)
-    data[i].savestring = savestring.decode("utf-8")
+    savestring_decode = savestring.decode("utf-8")
+    savearray = [[float(digit) for digit in line.split()] for line in savestring_decode.splitlines()]
 
+    data[i].out_array = np.array(out_array)
+    data[i].savearray = zlib.compress(pickle.dumps(savearray))
 
 comm.Barrier()
 
@@ -76,7 +89,7 @@ if rank == 0:
     for i in output_array:
         for j in i:
             cvessel_array.append(j)
-            
+
     cvessel_file = open("cvessel_array.dat","wb")
     pickle.dump(cvessel_array, cvessel_file)
     cvessel_file.close()

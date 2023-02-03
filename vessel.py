@@ -47,7 +47,7 @@ class Vessel():
         self.predictMethod = kwargs.get("predictMethod", "aitken")
         self.gnr_step_size = kwargs.get("gnr_step_size", 1.0)
         self.damping = kwargs.get("damping", 1e4)
-        self.penalty = kwargs.get("penalty", 1e7)
+        self.penalty = kwargs.get("penalty", 1e8)
         self.startTime = 0.0
         self.currTime = 0.0
         self.tolerance = kwargs.get("tolerance", 1e-2)

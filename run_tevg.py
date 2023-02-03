@@ -17,9 +17,9 @@ if os.path.exists('vessel.pickle'):
     simulation_vessel = loadVessel()
     simulation_vessel.startTime = simulation_vessel.currTime
 else:
-    simulation_vessel = vessel.Vessel(radius=0.8573, thickness=0.0743, length=0.857*4, numLen=18, numCirc=24)
+    simulation_vessel = vessel.Vessel(radius=0.8573, thickness=0.0743, length=0.857*6, numLen=36, numCirc=36, numRad=6)
     simulation_vessel.gnr_step_size = 4.0
-    simulation_vessel.adaptiveMesh = True
+    #simulation_vessel.adaptiveMesh = True
     simulation_vessel.tevg = 1
     simulation_vessel.damping = 1e4
     simulation_vessel.penalty = 1e8
