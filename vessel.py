@@ -600,8 +600,14 @@ class Vessel():
             solidStressId = int(self.vesselReference.GetCellData().GetArray('solidStressQueryID').GetTuple1(q))
 
             sigma_inv = 0.0
-            # For each cell, use trapezoidal integration to compute sigma
-            for p in range(fluidStressId, solidStressId):
+
+            # For each cell, use trapezoidal integration to compute sigma. Choose to average radially or not.
+            if self.averageStress:
+                stressRange = range(fluidStressId, solidStressId)
+            else:
+                stressRange = range(q, q+1)
+
+            for p in stressRange:
                 cell = self.solidResult.GetCell(p)
                 cellPts = cell.GetPointIds()
                 cellSigma = 0.0
@@ -612,7 +618,9 @@ class Vessel():
                 cellSigma *= 1/float(cellPts.GetNumberOfIds())
                 sigma_inv = sigma_inv + cellSigma
 
-            sigma_inv = 0.1*sigma_inv/(solidStressId-fluidStressId)
+            sigma_inv = 0.1*sigma_inv
+            if self.averageStress:
+                sigma_inv = sigma_inv/(solidStressId-fluidStressId)
 
             inv_prev = self.vesselReference.GetCellData().GetArray("inv_curr").GetTuple1(q)
             self.vesselReference.GetCellData().GetArray("inv_prev").SetTuple1(q, inv_prev)
@@ -689,7 +697,12 @@ class Vessel():
                 stiffness = rotateStiffness(stiffness_mem,Q)
                 stiffness_g = stiffness_g + stiffness.tolist()
 
-                varWallProps_g = np.hstack((varWallProps_g,np.hstack((stiffness,p_est_g[p],J_target/J_c,sigma_gnr_g[p*6:(p+1)*6],p))))
+                if self.averageVolume:
+                    J_final = J_target/J_c
+                else:
+                    J_final = J_target/J_curr[p]
+
+                varWallProps_g = np.hstack((varWallProps_g,np.hstack((stiffness,p_est_g[p],J_final,sigma_gnr_g[p*6:(p+1)*6],p))))
 
             self.vesselReference.GetCellData().GetArray('varWallProps').SetTuple(q,varWallProps_g)
             self.vesselReference.GetCellData().GetArray('p_est').SetTuple(q,p_est_g)
