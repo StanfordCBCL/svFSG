@@ -71,6 +71,8 @@ class Vessel():
         self.cvessels = []
         self.flipContours = False
         self.flipInlet = False
+        self.averageStress = False
+        self.averageVolume = False
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -152,7 +154,7 @@ class Vessel():
         else:
             os.system("mpiexec -np " + str(self.numProcessorsSolid) + " " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")                
         print("Solid simulation finished.")
-
+        os.system('cp ' + self.resultDir + '/result_'+str(self.resultNum)+'.vtu simulationResults/solid_' + str(self.timeStep) + '.vtu')
         return
 
     def runFluid(self):
@@ -162,6 +164,7 @@ class Vessel():
             if 'NaN' in f.read():
                 raise RuntimeError("Simulation has NaN!")
         print("Fluid simulation finished.")
+        os.system('cp ' + self.resultDir + '/result_'+str(self.resultNum)+'.vtu simulationResults/fluid_' + str(self.timeStep) + '.vtu')
         return
 
     def runFluidSolid(self):
@@ -174,6 +177,7 @@ class Vessel():
             if 'NaN' in f.read():
                 raise RuntimeError("Simulation has NaN!")
         print("FSI simulation finished.")
+        os.system('cp ' + self.resultDir + '/result_'+str(self.resultNum)+'.vtu simulationResults/fluidsolid_' + str(self.timeStep) + '.vtu')
 
         return
 
