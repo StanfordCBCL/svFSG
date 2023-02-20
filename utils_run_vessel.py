@@ -61,7 +61,7 @@ for i in range(0,np.shape(data)[0],1):
     prefix = data[i].prefix.encode('utf-8')
     suffix = data[i].name.encode('utf-8')
     
-    buffersize = 128 * 1024
+    buffersize = 4 * 128 * 1024
     allocation = ctypes.create_string_buffer(buffersize)
 
     savestring = run(loadstring, prefix, suffix, data[i].restart, data[i].iteration, data[i].simulate, \

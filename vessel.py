@@ -21,7 +21,9 @@ class Vessel():
         self.tau_h = None
 
         self.nG = 8
-        self.max_days = kwargs.get("max_days", 720)
+        self.total_time_steps = 0
+        self.gnr_max_days = kwargs.get("gnr_max_days", 720)
+        self.gnr_step_size = kwargs.get("gnr_step_size", 1.0)
         self.prefix = kwargs.get("prefix", "./")
         self.numRad = kwargs.get("numRad", 4)
         self.numCirc = kwargs.get("numCirc", 12)
@@ -45,7 +47,6 @@ class Vessel():
         self.outputDir = kwargs.get("outputDir","Outputs")
         self.estimateWSS = kwargs.get("estimateWSS", False)
         self.predictMethod = kwargs.get("predictMethod", "aitken")
-        self.gnr_step_size = kwargs.get("gnr_step_size", 1.0)
         self.damping = kwargs.get("damping", 1e4)
         self.penalty = kwargs.get("penalty", 1e8)
         self.startTime = 0.0
@@ -57,6 +58,9 @@ class Vessel():
         self.constantThickness = kwargs.get("constantThickness",False)
         self.adaptiveMesh = kwargs.get("adaptiveMesh",False)
         self.rotation_matrix = np.eye(3)
+        self.numProcessorsSolid = 24
+        self.numProcessorsFluid = 24
+        self.numProcessorsFluidSolid = 24
         self.zcenter = 0.0
         self.nq = 10
         self.iq_eps = 1e-12
@@ -65,6 +69,8 @@ class Vessel():
         self.displacements_i = []
         self.displacements_k = []
         self.cvessels = []
+        self.flipContours = False
+        self.flipInlet = False
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
@@ -142,16 +148,16 @@ class Vessel():
     def runSolid(self):
         os.system('rm -rf '+self.resultDir +'/*')
         if self.timeIter == 0 and self.timeStep == 0:
-            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_mm.mfs")
+            os.system("mpiexec -np " + str(self.numProcessorsSolid) + " " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_mm.mfs")
         else:
-            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")                
+            os.system("mpiexec -np " + str(self.numProcessorsSolid) + " " + self.simulationExecutable + " " + self.simulationInputDirectory + "/solid_aniso.mfs")                
         print("Solid simulation finished.")
 
         return
 
     def runFluid(self):
         os.system('rm -rf '+self.resultDir +'/*')
-        os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_fluid.mfs")
+        os.system("mpiexec -np " + str(self.numProcessorsFluid) + " " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_fluid.mfs")
         with open(self.resultDir+'/histor.dat') as f:
             if 'NaN' in f.read():
                 raise RuntimeError("Simulation has NaN!")
@@ -161,9 +167,9 @@ class Vessel():
     def runFluidSolid(self):
         os.system('rm -rf '+self.resultDir +'/*')
         if self.timeIter == 0 and self.timeStep == 0:
-            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_mm.mfs")
+            os.system("mpiexec -np " + str(self.numProcessorsFluidSolid) + " " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_mm.mfs")
         else:
-            os.system("mpiexec " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_aniso.mfs")
+            os.system("mpiexec -np " + str(self.numProcessorsFluidSolid) + " " + self.simulationExecutable + " " + self.simulationInputDirectory + "/input_aniso.mfs")
         with open(self.resultDir+'/histor.dat') as f:
             if 'NaN' in f.read():
                 raise RuntimeError("Simulation has NaN!")
@@ -182,6 +188,7 @@ class Vessel():
             print("TODO: Implement new initializer")
         self.saveReference()
 
+        self.total_time_steps = self.gnr_max_days//self.gnr_step_size
         self.cvessels = [cvessel() for i in range(self.vesselReference.GetNumberOfCells() * self.nG)]
 
         return
@@ -221,7 +228,7 @@ class Vessel():
                 self.cvessels[q*self.nG + p].restart = self.timeStep
                 self.cvessels[q*self.nG + p].iteration = self.timeIter
                 self.cvessels[q*self.nG + p].simulate = simulate
-                self.cvessels[q*self.nG + p].num_days = self.max_days
+                self.cvessels[q*self.nG + p].num_days = self.gnr_max_days
                 self.cvessels[q*self.nG + p].step_size = self.gnr_step_size
                 self.cvessels[q*self.nG + p].sigma_inv = sigma_inv
                 self.cvessels[q*self.nG + p].tauw_wss = tauw_wss
@@ -290,7 +297,7 @@ class Vessel():
         self.vesselSolid = self.vesselReference.warp_by_vector("displacements")
         arrayNames = self.vesselReference.array_names
         for name in arrayNames:
-            if name not in ["GlobalNodeID", "varWallProps", "GlobalElementID", "InnerRegionID", "OuterRegionID", "DistalRegionID", "ProximalRegionID", "StructureID", "Pressure"]:
+            if name not in ["GlobalNodeID", "varWallProps", "GlobalElementID", "InnerRegionID", "OuterRegionID", "DistalRegionID", "ProximalRegionID", "StructureID", "Pressure", "Coordinate"]:
                 if name in self.vesselSolid.point_data:
                     self.vesselSolid.point_data.remove(name)
                 if name in self.vesselSolid.cell_data:
@@ -869,6 +876,8 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_curr"))
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_prev"))
         vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
+        vol.GetPointData().AddArray(pv.convert_array(vol.points.astype(float),name="Coordinate"))
+
 
         return vol
 
@@ -893,7 +902,8 @@ class Vessel():
 
         #Align inner data to each other
         #Flip first contour to prevent negative jacobian (seems necessary on only come ctgrs?)
-        ctgrPtsInner[0] = flipContour(ctgrPtsInner[0])
+        if self.flipContours:
+            ctgrPtsInner[0] = flipContour(ctgrPtsInner[0])
         for i in range(np.shape(ctgrPtsInner)[0]-1):
             ctgrPtsInner[i+1] = alignContours(ctgrPtsInner[i],ctgrPtsInner[i+1])
 
@@ -946,8 +956,14 @@ class Vessel():
         distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
         sliceIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
 
-        proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
-        distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
+        if self.flipInlet:
+            distalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
+            proximalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
+        else:
+            proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
+            distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
+
+
         innerIds[0:(self.numCirc+1)*(self.numLen+1)*(self.numRad+1):(self.numRad+1)]=1
         outerIds[self.numRad:(self.numCirc+1)*(self.numLen+1)*(self.numRad+1):(self.numRad+1)]=1
 
@@ -1130,6 +1146,7 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_curr"))
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_prev"))
         vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
+        vol.GetPointData().AddArray(pv.convert_array(vol.points.astype(float),name="Coordinate"))
 
         return vol
 
@@ -1147,11 +1164,18 @@ class Vessel():
         outIds = np.zeros((numQuad**2 + (numTrans-1)*self.numCirc)*(self.numLen+1))
         wallIds = np.zeros((numQuad**2 + (numTrans-1)*self.numCirc)*(self.numLen+1))
 
-        outIds[0:numQuad**2] = 1
-        outIds[((self.numLen+1)*numQuad**2):((self.numLen+1)*numQuad**2)+ (numTrans-1)*self.numCirc] = 1
+        if self.flipInlet:
+            inIds[0:numQuad**2] = 1
+            inIds[((self.numLen+1)*numQuad**2):((self.numLen+1)*numQuad**2)+ (numTrans-1)*self.numCirc] = 1
 
-        inIds[((self.numLen+1)-1)*numQuad**2:(self.numLen+1)*numQuad**2] = 1
-        inIds[-(numTrans-1)*self.numCirc:] = 1
+            outIds[((self.numLen+1)-1)*numQuad**2:(self.numLen+1)*numQuad**2] = 1
+            outIds[-(numTrans-1)*self.numCirc:] = 1
+        else:
+            outIds[0:numQuad**2] = 1
+            outIds[((self.numLen+1)*numQuad**2):((self.numLen+1)*numQuad**2)+ (numTrans-1)*self.numCirc] = 1
+
+            inIds[((self.numLen+1)-1)*numQuad**2:(self.numLen+1)*numQuad**2] = 1
+            inIds[-(numTrans-1)*self.numCirc:] = 1
 
         for ia in range(self.numLen+1):
             wallIds[((self.numLen+1)*numQuad**2) + (numTrans-2)*self.numCirc + ia*(numTrans-1)*(self.numCirc):((self.numLen+1)*numQuad**2) + (numTrans-1)*self.numCirc + ia*(numTrans-1)*(self.numCirc)] = 1
@@ -1290,8 +1314,8 @@ class Vessel():
 
         with open(self.simulationInputDirectory + '/input_fluid.mfs', 'r') as file:
             data = file.readlines()
-        data[76] = "      Value: " + str(self.inletFlow) + "\n"
-        data[84] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
+        data[73] = "      Value: " + str(self.inletFlow) + "\n"
+        data[81] = "      Value: " + str(- self.outletPressure / self.inletFlow) + "\n"
         with open(self.simulationInputDirectory + '/input_fluid.mfs', 'w') as file:
             file.writelines(data)
 
