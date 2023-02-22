@@ -71,8 +71,8 @@ class Vessel():
         self.cvessels = []
         self.flipContours = False
         self.flipInlet = False
-        self.averageStress = False
-        self.averageVolume = False
+        self.averageStress = True
+        self.averageVolume = True
 
     def writeStatus(self, currTime):
         with open('svDriverIterations','a') as f:
