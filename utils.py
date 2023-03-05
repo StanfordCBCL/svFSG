@@ -1,7 +1,7 @@
+import vtk
+import pyvista as pv
 import numpy as np
 import scipy as sp
-import pyvista as pv
-import vtk
 import os
 import pickle
 import re
@@ -89,7 +89,8 @@ def thresholdModel(data,dataName,low,high,extract=True,cell=False):
         data.GetPointData().SetActiveScalars(dataName)
     t = vtk.vtkThreshold()
     t.SetInputData(data)
-    t.ThresholdBetween(low,high)
+    t.SetLowerThreshold(low)
+    t.SetUpperThreshold(high)
     if cell:
         t.SetInputArrayToProcess(0,0,0,vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS, vtk.vtkDataSetAttributes.SCALARS)
     else:
@@ -144,7 +145,7 @@ def clean(data, tolerance=None):
     unique_nodes *= tolerance
     new_points = pv.vtk_points(unique_nodes)
     output.SetPoints(new_points)
-    for name, arr in data.point_arrays.items():
+    for name, arr in data.point_data.items():
         output[name] = arr[index]
 
     cell_set = set()
@@ -593,3 +594,17 @@ def interpolateSpline(array,numPts = 20,periodic = False,degree=3,redistribute=T
     xi, yi, zi = si.splev(uAdd, tck)
 
     return np.transpose(np.vstack((xi,yi,zi)))
+
+def smoothAttributes(data, relaxationFactor=0.1, numIterations=100):
+    attributeSmoothingFilter = vtk.vtkAttributeSmoothingFilter()
+    attributeSmoothingFilter.SetInputData(data)
+    attributeSmoothingFilter.SetSmoothingStrategyToAllPoints()
+    attributeSmoothingFilter.SetNumberOfIterations(numIterations)
+    attributeSmoothingFilter.SetRelaxationFactor(relaxationFactor)
+    attributeSmoothingFilter.SetWeightsTypeToDistance()
+    attributeSmoothingFilter.AddExcludedArray("Pressure")
+    attributeSmoothingFilter.AddExcludedArray("Velocity")
+    attributeSmoothingFilter.AddExcludedArray("Displacement")
+    attributeSmoothingFilter.AddExcludedArray("displacements")
+    attributeSmoothingFilter.Update()
+    return pv.wrap(attributeSmoothingFilter.GetOutput())

@@ -23,16 +23,17 @@ else:
     simulation_vessel.tevg = 1
     simulation_vessel.damping = 1e4
     simulation_vessel.penalty = 1e8
-    simulation_vessel.simulationExecutable = "-np 24 ~/svFSI-build/svFSI-build/mysvfsi"
+    simulation_vessel.simulationExecutable = "~/svFSI-build/svFSI-build/mysvfsi"
     simulation_vessel.setInputFileValues()
     os.system('mkdir -p ' + simulation_vessel.outputDir)
     os.system('mkdir -p ' + 'meshIterations')
     os.system('mkdir -p ' + 'meshResults')
+    os.system('mkdir -p ' + 'simulationResults')
     simulation_vessel.initializeVessel()
 
 startTime = time.time()
 
-while simulation_vessel.timeStep < simulation_vessel.max_days:
+while simulation_vessel.timeStep < simulation_vessel.total_time_steps:
     while simulation_vessel.residual > simulation_vessel.tolerance or simulation_vessel.timeIter < 3:
         simulation_vessel.runSolidIteration()
         simulation_vessel.estimateFluidIteration()

@@ -1950,7 +1950,7 @@ void vessel::initializeTEVGHandshake(string scaffold_name, string immune_name, d
     double ps_norm, fd_norm;
     Immune_in >> ps_norm >> fd_norm;
 
-    double K_i_p_trans =  K_i_p_mic * (ps_p / ps_norm * fd_p / fd_norm) + K_i_p_wound;
+    double K_i_p_trans =  tevg_val * K_i_p_mic * (ps_p / ps_norm * fd_p / fd_norm) + K_i_p_wound;
     double K_i_p_steady = K_i_p_mic * (ps_norm / ps_p + fd_p / fd_norm - 2);
     K_i_p_steady = (K_i_p_steady > 0)* K_i_p_steady;
     double K_i_d = K_i_p_trans / K_i_d_max;

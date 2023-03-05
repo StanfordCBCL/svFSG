@@ -66,10 +66,10 @@ Add equation: struct {
       Displacement: t
       Velocity: t
       Jacobian: t
-      Stress: t
-      Strain: t
+      #Stress: t
+      #Strain: t
       Cauchy_stress: t
-      Def_grad: t
+      #Def_grad: t
    }
 
    Add BC: wall_inlet {

@@ -73,10 +73,11 @@ class Vessel():
         self.flipInlet = False
         self.averageStress = True
         self.averageVolume = True
+        self.solidLinearSolverType = "BICGS"
 
-    def writeStatus(self, currTime):
+    def writeStatus(self, currTime, extra=""):
         with open('svDriverIterations','a') as f:
-            print("%d %d %.3e %s %5.4f %5.2f" %(self.timeStep,self.timeIter,self.residual, self.residualType, self.omega, currTime), file=f)
+            print("%d %d %.3e %s %5.4f %5.2f %s" %(self.timeStep,self.timeIter,self.residual, self.residualType, self.omega, currTime, extra), file=f)
 
     def setTime(self, timeVal):
         self.time = timeVal
@@ -104,11 +105,17 @@ class Vessel():
         self.estimateIterfaceResult()
         return
 
+    def skipFluidIteration(self):
+        numCells = self.vesselReference.GetNumberOfCells()
+        for q in range(numCells):
+            wss_prev = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
+            self.vesselReference.GetCellData().GetArray('wss_prev').SetTuple1(q,wss_prev)
+        return
+
     def runFluidSolidIteration(self):
         self.updateSolid()
         self.saveSolid()
         self.updateFluid()
-        self.appendFluidResult()
         self.saveFluid()
         self.runFluidSolid()
         self.updateFluidSolidResults()
@@ -117,14 +124,29 @@ class Vessel():
         return
 
     def runSolidIteration(self):
+
         self.updateSolid()
         self.saveSolid()
         self.runSolid()
+
+        runGMRES = False
         with open(self.resultDir+'/histor.dat') as f:
             if 'NaN' in f.read():
-                print("Simulation has NaN! Reducing omega.", file=sys.stderr)
-                self.appendReducedResult()
-                return
+                runGMRES = True
+                print("Simulation has NaN! Running with GMRES.", file=sys.stderr)
+
+        if runGMRES:
+            self.solidLinearSolverType = "GMRES"
+            self.setInputFileValues()
+            self.runSolid()
+            with open(self.resultDir+'/histor.dat') as f:
+                if 'NaN' in f.read():
+                    print("Simulation has NaN! Reducing omega.", file=sys.stderr)
+                    self.appendReducedResult()
+                    return
+            self.solidLinearSolverType = "BICGS"
+            self.setInputFileValues()
+
         self.updateSolidResults()
         self.appendSolidResult()
         return
@@ -394,6 +416,28 @@ class Vessel():
         pointLocatorFluid.SetDataSet(fluidSurface)
         pointLocatorFluid.BuildLocator()
 
+        innerReference = thresholdModel(self.vesselReference.extract_surface(), 'InnerRegionID',0.5,1.5)
+        numPointsInner = innerReference.GetNumberOfPoints()
+
+        arrayNames = innerReference.array_names
+        for name in arrayNames:
+            if name not in ["displacements", "fluidStressQueryID", "WSS", "Pressure"]:
+                if name in innerReference.point_data:
+                    innerReference.point_data.remove(name)
+                if name in self.vesselSolid.cell_data:
+                    innerReference.cell_data.remove(name)
+
+        for q in range(numPointsInner):
+            fluidCoordinate = np.array(innerReference.GetPoint(q)) + np.array(innerReference.GetPointData().GetArray("displacements").GetTuple3(q))
+            fluidId = int(pointLocatorFluid.FindClosestPoint(fluidCoordinate))
+            innerReference.GetPointData().GetArray('WSS').SetTuple1(q,np.linalg.norm(fluidSurface.GetPointData().GetArray('WSS').GetTuple3(fluidId)))
+            innerReference.GetPointData().GetArray('Pressure').SetTuple1(q,fluidSurface.GetPointData().GetArray('Pressure').GetTuple1(fluidId))
+
+        innerReference = smoothAttributes(innerReference, 0.05, 100)
+        pointLocatorInner = vtk.vtkPointLocator()
+        pointLocatorInner.SetDataSet(innerReference)
+        pointLocatorInner.BuildLocator()
+
         for q in range(numCells):
             fluidStressId = int(self.vesselReference.GetCellData().GetArray('fluidStressQueryID').GetTuple1(q))
             cell = self.vesselReference.GetCell(fluidStressId)
@@ -405,12 +449,10 @@ class Vessel():
             for p in range(cellPts.GetNumberOfIds()):
                 ptId = cellPts.GetId(p)
                 if self.vesselReference.GetPointData().GetArray('InnerRegionID').GetTuple1(ptId) == 1:
-                    fluidCoordinate = np.array(self.vesselReference.GetPoint(ptId)) + np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(ptId))
-                    fluidId = int(pointLocatorFluid.FindClosestPoint(fluidCoordinate))
-                    pointWSS = fluidSurface.GetPointData().GetArray('WSS').GetTuple3(fluidId)
-                    pointPressure = fluidSurface.GetPointData().GetArray('Pressure').GetTuple1(fluidId)
-                    self.vesselReference.GetPointData().GetArray('Pressure').SetTuple1(ptId,pointPressure)
-                    cellWSS += np.linalg.norm(pointWSS)
+                    innerCoordinate = np.array(self.vesselReference.GetPoint(ptId))
+                    innerId = int(pointLocatorInner.FindClosestPoint(innerCoordinate))
+                    self.vesselReference.GetPointData().GetArray('Pressure').SetTuple1(ptId,innerReference.GetPointData().GetArray('Pressure').GetTuple1(innerId))
+                    cellWSS += innerReference.GetPointData().GetArray('WSS').GetTuple1(innerId)
                     numberOfPoints += 1
             #Average WSS in cell
             cellWSS *= 1/float(numberOfPoints)
@@ -505,6 +547,9 @@ class Vessel():
 
 
     def appendSolidResult(self):
+
+        self.solidResult = smoothAttributes(self.solidResult,0.05,100)
+
         pointLocatorSolid = vtk.vtkPointLocator()
         pointLocatorSolid.SetDataSet(self.solidResult)
         pointLocatorSolid.BuildLocator()
@@ -534,15 +579,15 @@ class Vessel():
         if self.predictMethod == "none":
             self.omega = 1.0
         elif self.predictMethod == "aitken":
-            if self.timeIter > 1:
+            if self.timeIter > 0:
                 rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
                 rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
-                self.omega = 0.5
-            if self.omega > 1:
                 self.omega = 1.0
+            if self.omega > 10:
+                self.omega = 10.0
             elif self.omega < 0.1:
                 self.omega = 0.1
         elif self.predictMethod == "iqnils":
@@ -834,6 +879,17 @@ class Vessel():
 
                     if self.tevg:
                         tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getTEVGValue([xPt,yPt,zPt], self.radius)
+                        if tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] > 0:
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,4] = 200000000
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,1] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,2] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,3] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,14] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,28] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,42] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,56] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,70] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,84] = 0
                     if self.aneurysm:
                         aneurysmValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getAneurysmValue([xPt,yPt,zPt], self.radius)
 
@@ -893,8 +949,8 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_curr"))
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_prev"))
         vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
+        vol.GetPointData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numPts).astype(float),name="WSS"))
         vol.GetPointData().AddArray(pv.convert_array(vol.points.astype(float),name="Coordinate"))
-
 
         return vol
 
@@ -1163,6 +1219,7 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_curr"))
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_prev"))
         vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
+        vol.GetPointData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numPts).astype(float),name="WSS"))
         vol.GetPointData().AddArray(pv.convert_array(vol.points.astype(float),name="Coordinate"))
 
         return vol
@@ -1295,9 +1352,8 @@ class Vessel():
         cellArray = [ [8] + cell for cell in cells]
         cellTypes = np.empty(np.shape(cells)[0], dtype=np.uint8)
         cellTypes[:] = vtk.VTK_HEXAHEDRON
-        cellOffset = range(0,np.shape(cells)[0]*9,9)
 
-        vol = pv.UnstructuredGrid(np.array(cellOffset), np.array(cellArray), np.array(cellTypes), np.array(points))
+        vol = pv.UnstructuredGrid(np.array(cellArray), np.array(cellTypes), np.array(points))
 
         vol.GetPointData().AddArray(pv.convert_array((inIds).astype(int),name="ProximalRegionID"))
         vol.GetPointData().AddArray(pv.convert_array((outIds).astype(int),name="DistalRegionID"))
@@ -1306,7 +1362,6 @@ class Vessel():
         numPts = vol.GetNumberOfPoints()
         vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="Velocity"))
         vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
-
         return vol
 
     def setInputFileValues(self):
@@ -1340,6 +1395,13 @@ class Vessel():
             data = file.readlines()
         data[53] = "   Penalty parameter: " + str(self.penalty) + "\n"
         data[55] = "   Mass damping: " + str(self.damping) + "\n"
+        data[57] = "   LS type: " + str(self.solidLinearSolverType) + " {\n"
+        if self.solidLinearSolverType == "GMRES":
+            data[59] = "      Max iterations: 10\n"
+            data[60] = "      Krylov space dimension: 50\n"
+        else:
+            data[59] = "      Max iterations: 1000\n"
+            data[60] = "      Krylov space dimension: 250\n"
         with open(self.simulationInputDirectory + '/solid_aniso.mfs', 'w') as file:
             file.writelines(data)
 
@@ -1347,8 +1409,17 @@ class Vessel():
             data = file.readlines()
         data[54] = "   Penalty parameter: " + str(self.penalty) + "\n"
         data[56] = "   Mass damping: " + str(self.damping) + "\n"
+        data[58] = "   LS type: " + str(self.solidLinearSolverType) + " {\n"
+        if self.solidLinearSolverType == "GMRES":
+            data[60] = "      Max iterations: 10\n"
+            data[61] = "      Krylov space dimension: 50\n"
+        else:
+            data[60] = "      Max iterations: 1000\n"
+            data[61] = "      Krylov space dimension: 250\n"
         with open(self.simulationInputDirectory + '/solid_mm.mfs', 'w') as file:
             file.writelines(data)
+
+
 
     """
     def setPressure()
