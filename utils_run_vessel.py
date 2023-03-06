@@ -43,9 +43,9 @@ for i in range(0,np.shape(data)[0],1):
     savearray = pickle.loads(zlib.decompress(data[i].savearray))
 
     loadstring = ""
-    array_length = np.shape(savearray)[0]
+    array_length = len(savearray)
     for j in range(array_length):
-        number_length = np.shape(savearray[j])[0]
+        number_length =len(savearray[j])
         for k in range(number_length):
             number = savearray[j][k]
             if number.is_integer():
