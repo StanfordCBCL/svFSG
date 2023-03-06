@@ -87,16 +87,16 @@ Add equation: FSI {
       #Elasticity modulus: 1e6
       #Poisson ratio: 0.4
       Dilational penalty model: M94
-      Penalty parameter: 100000000.0
+      Penalty parameter: 500000000.0
       Density: 0.0
       Mass damping: 10000.0
    }
 
    LS type: BICGS {
-      Preconditioner: Trilinos-Diagonal
-      Tolerance: 1e-4
-      Max iterations: 200
-      #Krylov space dimension: 50
+      Preconditioner: Trilinos-BlockJacobi
+      Tolerance: 0.1
+      Max iterations: 1000
+      Krylov space dimension: 250
    }
 
    Output: Spatial {
@@ -118,7 +118,7 @@ Add equation: FSI {
    Add BC: lumen_inlet {
       Type: Dir
       Time dependence: Steady
-      Value: -20
+      Value: -97.0
       Impose flux: 1
       Profile: Parabolic
       Zero out perimeter: f
@@ -130,7 +130,7 @@ Add equation: FSI {
    Add BC: lumen_outlet {
       Type: Neu
       Time dependence: Resistance
-      Value: 307.5
+      Value: 1374.5360824742268
    }
 
    Add BC: wall_inlet {

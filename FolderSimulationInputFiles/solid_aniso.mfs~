@@ -38,7 +38,7 @@ Add mesh: wall {
    Add face: wall_outer {
       Face file path: mesh/solid-mesh-complete/mesh-surfaces/wall_outer.vtp
    }
-  Number of variable wall properties: 98
+  Number of variable wall properties: 360
   Variable wall properties file path: mesh/solid-mesh-complete/mesh-complete.mesh.vtu
 }
 
@@ -50,16 +50,16 @@ Add equation: struct {
    Max iterations: 20
    Tolerance: 1e-4
 
-   Constitutive model: mm
-   #Dilational penalty model: M94
+   Constitutive model: anisotropic
    Penalty parameter: 500000000.0
    Density: 0.0
    Mass damping: 10000.0
 
-   LS type: GMRES {
+   LS type: BICGS {
       Preconditioner: Trilinos-BlockJacobi
-      Max iterations: 10
-      Krylov space dimension: 50
+      Tolerance: 0.1
+      Max iterations: 1000
+      Krylov space dimension: 250
    }
    
    Output: Spatial {
@@ -94,7 +94,6 @@ Add equation: struct {
       Spatial values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_inner.vtp
    }
 
- 
    Add BC: wall_outer {
       Type: Robin
       Time dependence: Steady
@@ -104,6 +103,7 @@ Add equation: struct {
       Apply along normal direction: f
       Reference values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_outer.vtp
    }
-   
+
+ 
 }
 

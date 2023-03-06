@@ -82,12 +82,12 @@ Add equation: fluid {
       Value: 1374.5360824742268
    }   
 
-   #Add BC: lumen_outlet {
-   #   Type: Dir
-   #   Time dependence: Steady
-   #   Value: 0.0
-   #   Effective direction: (1, 1, 0)
-   #}
+   Add BC: lumen_outlet {
+      Type: Dir
+      Time dependence: Steady
+      Value: 0.0
+      Effective direction: (1, 1, 0)
+   }
 
    Add BC: lumen_wall {
       Type: Dir

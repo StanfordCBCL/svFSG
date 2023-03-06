@@ -51,25 +51,24 @@ Add equation: struct {
    Tolerance: 1e-4
 
    Constitutive model: anisotropic
-   Penalty parameter: 100000000.0
+   Penalty parameter: 500000000.0
    Density: 0.0
    Mass damping: 10000.0
 
-   LS type: BICGS {
+   LS type: GMRES {
       Preconditioner: Trilinos-BlockJacobi
-      Tolerance: 0.1
-      Max iterations: 1000
-      Krylov space dimension: 250
+      Max iterations: 10
+      Krylov space dimension: 50
    }
    
    Output: Spatial {
       Displacement: t
       Velocity: t
       Jacobian: t
-      #Stress: t
-      #Strain: t
+      Stress: t
+      Strain: t
       Cauchy_stress: t
-      #Def_grad: t
+      Def_grad: t
    }
 
    Add BC: wall_inlet {
@@ -92,6 +91,16 @@ Add equation: struct {
       Type: Neu
       Time dependence: Spatial
       Spatial values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_inner.vtp
+   }
+
+   Add BC: wall_outer {
+      Type: Robin
+      Time dependence: Steady
+      Value: 0.0
+      Stiffness : 1.0e5
+      Damping: 0.0
+      Apply along normal direction: f
+      Reference values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_outer.vtp
    }
 
  

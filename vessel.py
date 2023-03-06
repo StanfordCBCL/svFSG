@@ -73,7 +73,8 @@ class Vessel():
         self.flipInlet = False
         self.averageStress = True
         self.averageVolume = True
-        self.solidLinearSolverType = "BICGS"
+        self.solidLinearSolverType = "GMRES"
+        self.smoothAttributesValue = 0.0
 
     def writeStatus(self, currTime, extra=""):
         with open('svDriverIterations','a') as f:
@@ -129,23 +130,11 @@ class Vessel():
         self.saveSolid()
         self.runSolid()
 
-        runGMRES = False
         with open(self.resultDir+'/histor.dat') as f:
             if 'NaN' in f.read():
-                runGMRES = True
-                print("Simulation has NaN! Running with GMRES.", file=sys.stderr)
-
-        if runGMRES:
-            self.solidLinearSolverType = "GMRES"
-            self.setInputFileValues()
-            self.runSolid()
-            with open(self.resultDir+'/histor.dat') as f:
-                if 'NaN' in f.read():
-                    print("Simulation has NaN! Reducing omega.", file=sys.stderr)
-                    self.appendReducedResult()
-                    return
-            self.solidLinearSolverType = "BICGS"
-            self.setInputFileValues()
+                print("Simulation has NaN! Reducing omega.", file=sys.stderr)
+                self.appendReducedResult()
+                return
 
         self.updateSolidResults()
         self.appendSolidResult()
@@ -433,7 +422,9 @@ class Vessel():
             innerReference.GetPointData().GetArray('WSS').SetTuple1(q,np.linalg.norm(fluidSurface.GetPointData().GetArray('WSS').GetTuple3(fluidId)))
             innerReference.GetPointData().GetArray('Pressure').SetTuple1(q,fluidSurface.GetPointData().GetArray('Pressure').GetTuple1(fluidId))
 
-        innerReference = smoothAttributes(innerReference, 0.05, 100)
+        if self.smoothAttributesValue:
+            innerReference = smoothAttributes(innerReference, self.smoothAttributesValue, 100)
+
         pointLocatorInner = vtk.vtkPointLocator()
         pointLocatorInner.SetDataSet(innerReference)
         pointLocatorInner.BuildLocator()
@@ -548,7 +539,8 @@ class Vessel():
 
     def appendSolidResult(self):
 
-        self.solidResult = smoothAttributes(self.solidResult,0.05,100)
+        if self.smoothAttributesValue:
+            self.solidResult = smoothAttributes(self.solidResult,self.smoothAttributesValue,100)
 
         pointLocatorSolid = vtk.vtkPointLocator()
         pointLocatorSolid.SetDataSet(self.solidResult)
@@ -579,13 +571,13 @@ class Vessel():
         if self.predictMethod == "none":
             self.omega = 1.0
         elif self.predictMethod == "aitken":
-            if self.timeIter > 0:
+            if self.timeIter > 1:
                 rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
                 rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
-                self.omega = 1.0
+                self.omega = 0.5
             if self.omega > 10:
                 self.omega = 10.0
             elif self.omega < 0.1:
