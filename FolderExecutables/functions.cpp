@@ -821,7 +821,6 @@ void update_kinetics(vessel& curr_vessel) {
     }
 
     n = (sn - taun_min) + 1; //find number of integration pts
-    bool even_n = n % 2 == 0; //check if even # of int points
 
     //Loop through each constituent to update its mass density
     for (int alpha = 0; alpha < n_alpha; alpha++) {
@@ -886,37 +885,24 @@ void update_kinetics(vessel& curr_vessel) {
 
             //loop through and update constituent densities from previous time points
             //starting from the current time point and counting down is more efficient
-            for (int taun = sn - 1; taun >= taun_min + 1; taun = taun - 2) {
+            for (int taun = sn - 1; taun >= taun_min; taun = taun - 1) {
 
-                //Simpsons rule     
+                //Trapazoidal rule     
                 k_1 = curr_vessel.k_alpha[nts * alpha + taun];
                 q_1 = exp(-(k_2 + k_1) * dt / 2) * q_2;
                 mq_1 = curr_vessel.mR_alpha[nts * alpha + taun] * q_1;
 
-                k_0 = curr_vessel.k_alpha[nts * alpha + taun - 1];
-                q_0 = exp(-(k_2 + 4.0 * k_1 + k_0) * dt / 3) * q_2;
-                mq_0 = curr_vessel.mR_alpha[nts * alpha + taun - 1] * q_0;
+                rhoR_alpha_s += (mq_2 + mq_1) * dt / 2;
 
-                rhoR_alpha_s += (mq_2 + 4.0 * mq_1 + mq_0) * dt / 3;
+                k_2 = k_1;
+                q_2 = q_1;
+                mq_2 = mq_1;
 
-                k_2 = k_0;
-                q_2 = q_0;
-                mq_2 = mq_0;
-
-            }
-
-            //At last time step, doing trapezoidal integration if even integration pts
-            if (even_n) {
-                k_0 = curr_vessel.k_alpha[nts * alpha + taun_min];
-                q_0 = exp(-(k_2 + k_0) * dt / 2) * q_2;
-                mq_0 = curr_vessel.mR_alpha[nts * alpha + taun_min] * q_0;
-
-                rhoR_alpha_s += (mq_2 + mq_0) * dt / 2;
             }
 
             //Account for the cohort of material present initially
             if (taun_min == 0) {
-                rhoR_alpha_s += curr_vessel.rhoR_alpha[nts * alpha + 0] * q_0;
+                rhoR_alpha_s += curr_vessel.rhoR_alpha[nts * alpha + 0] * q_1;
             }
 
             //Update referential volume fraction
@@ -1046,7 +1032,6 @@ void update_sigma(void* curr_vessel) {
     }
 
     n = (sn - taun_min) + 1;; //number of integration pts
-    bool even_n = n % 2 == 0;
 
     //Similar integration to that used for kinematics
     for (int alpha = 0; alpha < n_alpha; alpha++) {
@@ -1083,7 +1068,7 @@ void update_sigma(void* curr_vessel) {
         //Check if during G&R or at initial time point
         if (sn > 0 && deg_check) {
 
-            for (int taun = sn - 1; taun >= taun_min + 1; taun = taun - 2) {
+            for (int taun = sn - 1; taun >= taun_min; taun = taun - 1) {
 
                 //Find the 1st intermediate deformation gradient
                 a = ((struct vessel*)curr_vessel)->a[taun];
@@ -1118,27 +1103,6 @@ void update_sigma(void* curr_vessel) {
                     hat_Cbar_1[dir] = F_alpha_ntau_s * F_alpha_ntau_s * hat_dSdC_alpha * F_alpha_ntau_s * F_alpha_ntau_s / J_s;
                 }
 
-                //Find the 2nd intermediate deformation gradient
-                a = ((struct vessel*)curr_vessel)->a[taun - 1];
-                h = ((struct vessel*)curr_vessel)->h[taun - 1];
-                lambda_th_tau = (a + h / 2) / (a0 + h0 / 2);
-                lambda_z_tau = ((struct vessel*)curr_vessel)->lambda_z_tau[taun - 1];
-                J_tau = ((struct vessel*)curr_vessel)->rhoR[taun - 1] / ((struct vessel*)curr_vessel)->rho[taun - 1];;
-                F_tau[0] = J_tau / (lambda_th_tau * lambda_z_tau);
-                F_tau[1] = lambda_th_tau;
-                F_tau[2] = lambda_z_tau;
-
-                //Find 2nd intermediate kinetics
-                k_0 = ((struct vessel*)curr_vessel)->k_alpha[nts * alpha + taun - 1];
-                q_0 = exp(-(k_2 + 4 * k_1 + k_0) * dt / 3) * q_2;
-                mq_0 = ((struct vessel*)curr_vessel)->mR_alpha[nts * alpha + taun - 1] * q_0;
-
-                //Find intermediate active state
-                if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    a_0 = a;
-                    q_act_0 = exp(-k_act * dt) * q_act_1;
-                }
-
                 //Find component in each direction
                 for (int dir = 0; dir < 3; dir++) {
 
@@ -1150,83 +1114,38 @@ void update_sigma(void* curr_vessel) {
                     hat_Cbar_0[dir] = F_alpha_ntau_s * F_alpha_ntau_s * hat_dSdC_alpha * F_alpha_ntau_s * F_alpha_ntau_s / J_s;
 
                     //Add to the stress and stiffness contribution in the given direction
-                    sigma[dir] += (mq_2 * hat_sigma_2[dir] + 4 * mq_1 * hat_sigma_1[dir] + mq_0 * hat_sigma_0[dir])
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 3;
-                    Cbar[dir] += (mq_2 * hat_Cbar_2[dir] + 4 * mq_1 * hat_Cbar_1[dir] + mq_0 * hat_Cbar_0[dir])
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 3;
+                    sigma[dir] += (mq_2 * hat_sigma_2[dir] + mq_1 * hat_sigma_1[dir])
+                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
+                    Cbar[dir] += (mq_2 * hat_Cbar_2[dir] + mq_1 * hat_Cbar_1[dir])
+                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
                 }
 
                 //Store active vars for next iteration
                 //Find intermediate active state
                 if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    a_act += k_act * (q_act_2 * a_2 + 4 * q_act_1 * a_1 + q_act_0 * a_0) * dt / 3;
-                    a_2 = a_0;
-                    q_act_2 = q_act_0;
+                    a_act += k_act * (q_act_2 * a_2 + q_act_1 * a_1) * dt / 2;
+                    a_2 = a_1;
+                    q_act_2 = q_act_1;
                 }
 
                 //Store intermediate kinetics for next iteration
-                k_2 = k_0;
-                q_2 = q_0;
-                mq_2 = mq_0;
+                k_2 = k_1;
+                q_2 = q_1;
+                mq_2 = mq_1;
 
                 //Store intermediate stress and stiffness for next iteration
-                hat_sigma_2 = hat_sigma_0;
-                hat_Cbar_2 = hat_Cbar_0;
+                hat_sigma_2 = hat_sigma_1;
+                hat_Cbar_2 = hat_Cbar_1;
 
-            }
-
-            if (even_n) {
-
-                //Find the 2nd intermediate deformation gradient
-                a = ((struct vessel*)curr_vessel)->a[taun_min];
-                h = ((struct vessel*)curr_vessel)->h[taun_min];
-                lambda_th_tau = (a + h / 2) / (a0 + h0 / 2);
-                lambda_z_tau = ((struct vessel*)curr_vessel)->lambda_z_tau[taun_min];
-                J_tau = ((struct vessel*)curr_vessel)->rhoR[taun_min] / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha];
-                F_tau[0] = J_tau / (lambda_th_tau * lambda_z_tau);
-                F_tau[1] = lambda_th_tau;
-                F_tau[2] = lambda_z_tau;
-
-                //Find 2nd intermediate kinetics
-                k_0 = ((struct vessel*)curr_vessel)->k_alpha[nts * alpha + taun_min];
-                q_0 = exp(-(k_2 + k_0) * dt / 2) * q_2;
-                mq_0 = ((struct vessel*)curr_vessel)->mR_alpha[nts * alpha + taun_min] * q_0;
-
-                //Find intermediate active state
-                if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    a_0 = a;
-                    q_act_0 = exp(-k_act * dt) * q_act_2;
-                }
-
-                //Find component in each direction
-                for (int dir = 0; dir < 3; dir++) {
-
-                    constitutive_return = constitutive(curr_vessel, lambda_alpha_s[alpha], alpha, taun_min);
-                    hat_S_alpha = constitutive_return[0];
-                    hat_dSdC_alpha = constitutive_return[1];
-                    F_alpha_ntau_s = F_s[dir] / F_tau[dir] * ((struct vessel*)curr_vessel)->G_alpha_h[3 * alpha + dir];
-                    hat_sigma_0[dir] = F_alpha_ntau_s * hat_S_alpha * F_alpha_ntau_s / J_s;
-                    hat_Cbar_0[dir] = F_alpha_ntau_s * F_alpha_ntau_s * hat_dSdC_alpha * F_alpha_ntau_s * F_alpha_ntau_s / J_s;
-
-                    //Add to the stress and stiffness contribution in the given direction
-                    sigma[dir] += (mq_2 * hat_sigma_2[dir] + mq_0 * hat_sigma_0[dir])
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
-                    Cbar[dir] += (mq_2 * hat_Cbar_2[dir] + mq_0 * hat_Cbar_0[dir])
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
-                }
-
-                if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    a_act += k_act * (q_act_2 * a_2 + q_act_0 * a_0) * dt / 2;
-                }
             }
 
             //Add in the stress and stiffness contributions of the initial material
             if (taun_min == 0) {
                 for (int dir = 0; dir < 3; dir++) {
                     sigma[dir] += ((struct vessel*)curr_vessel)->rhoR_alpha[nts * alpha + 0]
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_0 * hat_sigma_0[dir];
+                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_1 * hat_sigma_1[dir];
                     Cbar[dir] += ((struct vessel*)curr_vessel)->rhoR_alpha[nts * alpha + 0]
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_0 * hat_Cbar_0[dir];
+                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_1 * hat_Cbar_1[dir];
                 }
             }
 
@@ -1252,7 +1171,7 @@ void update_sigma(void* curr_vessel) {
         }
 
         if (taun_min == 0 && ((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-            a_act += ((struct vessel*) curr_vessel)->a_act[0] * q_act_0;
+            a_act += ((struct vessel*) curr_vessel)->a_act[0] * q_act_1;
         }
 
 
@@ -1377,7 +1296,6 @@ void update_sigma_handshake(void* curr_vessel) {
     //Local active variables
     double C = 0;
     double lambda_act = 0;
-    double lambda_act_0 = 0;
     double lambda_act_1 = 0;
     double lambda_act_2 = 0;
     double parab_act = 0;
@@ -1397,25 +1315,23 @@ void update_sigma_handshake(void* curr_vessel) {
     double CC_act_mat[3][3][3][3] = {0};
 
     double CC_sym[36] = {0};
-    double hat_CC_0[3][3][3][3] = {0};
     double hat_CC_1[3][3][3][3] = {0};
     double hat_CC_2[3][3][3][3] = {0};
 
     //Integration variables
     //For mass
-    double mq_0 = 0, mq_1 = 0, mq_2 = 0;
-    double q_0 = 1.0, q_1 = 1.0, q_2 = 1.0;
-    double k_0 = 0, k_1 = 0, k_2 = 0;
+    double mq_1 = 0, mq_2 = 0;
+    double q_1 = 1.0, q_2 = 1.0;
+    double k_1 = 0, k_2 = 0;
 
     int n = 0; //number of pts in integration interval
 
     //For stress
-    vector<double> hat_sigma_0 = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     vector<double> hat_sigma_1 = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     vector<double> hat_sigma_2 = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     //For active stress
     double k_act = ((struct vessel*) curr_vessel)->k_act;
-    double q_act_0 = 0, q_act_1 = 0, q_act_2 = 0;
+    double q_act_1 = 0, q_act_2 = 0;
 
 
     //Boolean for checks
@@ -1430,8 +1346,6 @@ void update_sigma_handshake(void* curr_vessel) {
     }
 
     n = (sn - taun_min) + 1; //number of integration pts
-    bool even_n = n % 2 == 0;
-
 
     //Similar Simpson's integration to that used for kinematics
     for (int alpha = 0; alpha < n_alpha; alpha++) {
@@ -1474,7 +1388,7 @@ void update_sigma_handshake(void* curr_vessel) {
         //Check if during G&R or at initial time point
         if (sn > 0 && deg_check) {
 
-            for (int taun = sn - 1; taun >= taun_min + 1; taun = taun - 2) {
+            for (int taun = sn - 1; taun >= taun_min; taun = taun - 1) {
 
                 //Find the 1st intermediate deformation gradient
                 for (int i = 0; i < 9; i++) {
@@ -1503,44 +1417,17 @@ void update_sigma_handshake(void* curr_vessel) {
                 get_material_stiffness(F_alpha_ntau_s, hat_dS_dlambda2_alpha,J_s,hat_CC_1);
 
 
-                //Find the 2nd intermediate deformation gradient
-                for (int i = 0; i < 9; i++) {
-                     F_tau[i] = ((struct vessel*)curr_vessel)->F_s[(taun-1)*9+i];
-                }
-                J_tau = mat_det(F_tau);
-                R_tau = mat_pol_dec(F_tau);
-                G_alpha_h_N = mat_mul(G_alpha_h,R_tau);
-
-                //Find 2nd intermediate kinetics
-                k_0 = ((struct vessel*)curr_vessel)->k_alpha[nts * alpha + taun - 1];
-                q_0 = exp(-(k_2 + 4 * k_1 + k_0) * dt / 3) * q_2;
-                mq_0 = ((struct vessel*)curr_vessel)->mR_alpha[nts * alpha + taun - 1] * q_0;
-
-                //Find intermediate active state
-                if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    lambda_act_0 = sqrt(C_s[4])/((struct vessel*) curr_vessel)->lambda_act[taun-1];
-                    q_act_0 = exp(-k_act * dt) * q_act_1;
-                }
-                
-                constitutive_return = constitutive(curr_vessel, lambda_alpha_s[alpha], alpha, taun - 1);
-                hat_S_alpha = constitutive_return[0];
-                hat_dS_dlambda2_alpha = constitutive_return[1];
-                F_alpha_ntau_s = mat_mul(mat_mul(F_s, mat_inv(F_tau)),G_alpha_h_N);
-                //Check if anisotropic
-                hat_sigma_0 = scl_mul(mat_mul(scl_mul(F_alpha_ntau_s, hat_S_alpha),mat_trans(F_alpha_ntau_s)), 1.0/J_s);
-                get_material_stiffness(F_alpha_ntau_s, hat_dS_dlambda2_alpha,J_s,hat_CC_0);
-
                 for(int i = 0; i<3; i++){
                     for(int j = 0; j<3; j++){
 
-                        sigma[(i*3)+j] += (mq_2 * hat_sigma_2[(i*3)+j] + 4 * mq_1 * hat_sigma_1[(i*3)+j] + mq_0 * hat_sigma_0[(i*3)+j])
-                            / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 3;
+                        sigma[(i*3)+j] += (mq_2 * hat_sigma_2[(i*3)+j] + mq_1 * hat_sigma_1[(i*3)+j])
+                            / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
 
                         for(int k = 0; k<3; k++){
                             for(int l = 0; l<3; l++){
 
-                                CC[i][j][k][l] += (mq_2 * hat_CC_2[i][j][k][l] + 4 * mq_1 * hat_CC_1[i][j][k][l] + mq_0 * hat_CC_0[i][j][k][l])
-                                    / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 3;
+                                CC[i][j][k][l] += (mq_2 * hat_CC_2[i][j][k][l] + mq_1 * hat_CC_1[i][j][k][l])
+                                    / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
                             }
                         }
                     }
@@ -1550,79 +1437,29 @@ void update_sigma_handshake(void* curr_vessel) {
                 //Find intermediate active state
 
                 if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    lambda_act += k_act * (q_act_2 * lambda_act_2 + 4 * q_act_1 * lambda_act_1 + q_act_0 * lambda_act_0) * dt / 3;
-                    lambda_act_2 = lambda_act_0;
-                    q_act_2 = q_act_0;
+                    lambda_act += k_act * (q_act_2 * lambda_act_2 + q_act_1 * lambda_act_1) * dt / 2;
+                    lambda_act_2 = lambda_act_1;
+                    q_act_2 = q_act_1;
                 }
 
                 //Store intermediate kinetics for next iteration
-                k_2 = k_0;
-                q_2 = q_0;
-                mq_2 = mq_0;
+                k_2 = k_1;
+                q_2 = q_1;
+                mq_2 = mq_1;
 
                 //Store intermediate stress and stiffness for next iteration
-                hat_sigma_2 = hat_sigma_0;
+                hat_sigma_2 = hat_sigma_1;
 
                 for(int i = 0; i<3; i++){
                     for(int j = 0; j<3; j++){
                         for(int k = 0; k<3; k++){
                             for(int l = 0; l<3; l++){
-                                hat_CC_2[i][j][k][l] = hat_CC_0[i][j][k][l];
+                                hat_CC_2[i][j][k][l] = hat_CC_1[i][j][k][l];
                             }
                         }
                     }
                 }
 
-
-            }
-
-            if (even_n) {
-                //Find the 1st intermediate deformation gradient
-                for (int i = 0; i < 9; i++) {
-                    F_tau[i] = ((struct vessel*)curr_vessel)->F_s[taun_min*9+i];
-                }
-                J_tau = mat_det(F_tau);
-                R_tau = mat_pol_dec(F_tau);
-                G_alpha_h_N = mat_mul(G_alpha_h,R_tau);
-
-                //Find 2nd intermediate kinetics
-                k_0 = ((struct vessel*)curr_vessel)->k_alpha[nts * alpha + taun_min];
-                q_0 = exp(-(k_2 + k_0) * dt / 2) * q_2;
-                mq_0 = ((struct vessel*)curr_vessel)->mR_alpha[nts * alpha + taun_min] * q_0;
-
-                //Find intermediate active state
-                if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    lambda_act_0 = sqrt(C_s[4])/((struct vessel*) curr_vessel)->lambda_act[taun_min];
-                    q_act_0 = exp(-k_act * dt) * q_act_2;
-                }
-
-                constitutive_return = constitutive(curr_vessel, lambda_alpha_s[alpha], alpha, taun_min);
-                hat_S_alpha = constitutive_return[0];
-                hat_dS_dlambda2_alpha = constitutive_return[1];
-                F_alpha_ntau_s = mat_mul(mat_mul(F_s, mat_inv(F_tau)),G_alpha_h_N);
-                //Check if anisotropic
-                hat_sigma_0 = scl_mul(mat_mul(scl_mul(F_alpha_ntau_s, hat_S_alpha),mat_trans(F_alpha_ntau_s)), 1.0/J_s);
-                get_material_stiffness(F_alpha_ntau_s, hat_dS_dlambda2_alpha,J_s,hat_CC_0);
-
-                for(int i = 0; i<3; i++){
-                    for(int j = 0; j<3; j++){
-
-                        sigma[(i*3)+j] += (mq_2 * hat_sigma_2[(i*3)+j] + mq_0 * hat_sigma_0[(i*3)+j])
-                        / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
-
-                        for(int k = 0; k<3; k++){
-                            for(int l = 0; l<3; l++){
-
-                                CC[i][j][k][l] += (mq_2 * hat_CC_2[i][j][k][l] + mq_0 * hat_CC_0[i][j][k][l])
-                                    / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * dt / 2;
-                            }
-                        }
-                    }
-                }
-
-                if (((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
-                    lambda_act += k_act * (q_act_2 * lambda_act_2 + q_act_0 * lambda_act_0) * dt / 2;
-                }
 
             }
 
@@ -1631,11 +1468,11 @@ void update_sigma_handshake(void* curr_vessel) {
                 for(int i = 0; i<3; i++){
                     for(int j = 0; j<3; j++){
                         sigma[(i*3)+j] += ((struct vessel*)curr_vessel)->rhoR_alpha[nts * alpha + 0]
-                            / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_0 * hat_sigma_0[(i*3)+j];
+                            / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_1 * hat_sigma_1[(i*3)+j];
                         for(int k = 0; k<3; k++){
                             for(int l = 0; l<3; l++){
                                 CC[i][j][k][l] +=((struct vessel*)curr_vessel)->rhoR_alpha[nts * alpha + 0]
-                                    / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_0 * hat_CC_0[i][j][k][l];
+                                    / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha] * q_1 * hat_CC_1[i][j][k][l];
                             }
                         }
                     }
@@ -1651,11 +1488,7 @@ void update_sigma_handshake(void* curr_vessel) {
             hat_S_alpha = constitutive_return[0];
             hat_dS_dlambda2_alpha = constitutive_return[1];
 
-            //Get stress, stiffness
-            //If present from begining G_alpha_h_N = G_alpha_h
-            //F_alpha_ntau_s = mat_mul(F_s,G_alpha_h);
             F_alpha_ntau_s = mat_mul(F_s,G_alpha_h);
-
 
             //Check if anisotropic
             hat_sigma_2 = scl_mul(mat_mul(scl_mul(F_alpha_ntau_s, hat_S_alpha),mat_trans(F_alpha_ntau_s)), 1.0/J_s);
@@ -1683,9 +1516,9 @@ void update_sigma_handshake(void* curr_vessel) {
 
         if (taun_min == 0 && ((struct vessel*) curr_vessel)->alpha_active[alpha] == 1) {
             if (!deg_check){
-                q_act_0 = exp(-k_act * dt) * q_act_2;
+                q_act_1 = exp(-k_act * dt) * q_act_2;
             }
-            lambda_act += sqrt(C_s[4])/((struct vessel*) curr_vessel)->lambda_act[0] * q_act_0;
+            lambda_act += sqrt(C_s[4])/((struct vessel*) curr_vessel)->lambda_act[0] * q_act_1;
         }
 
     }
@@ -1709,37 +1542,13 @@ void update_sigma_handshake(void* curr_vessel) {
     S_act = ((struct vessel*) curr_vessel)->T_act * (1 - exp(-pow(C, 2))) * pow(lambda_act, -1) * parab_act *
             ((struct vessel*)curr_vessel)->rhoR_alpha[nts * 1 + sn] / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[1];
 
-    //sigma_act = ((struct vessel*) curr_vessel)->rhoR_alpha[nts * 1 + sn] / J_s / 
-    //            ((struct vessel*) curr_vessel)->rhoR_h * hat_sigma_act;
 
-
-
-    //dSdC_act = ((struct vessel*) curr_vessel)->T_act *  (1 - exp(-pow(C, 2))) *
-    //           (((struct vessel*) curr_vessel)->lambda_m*((struct vessel*) curr_vessel)->lambda_0 - pow(((struct vessel*) curr_vessel)->lambda_0,2) - pow(lambda_act,2)) /
-    //           (pow(lambda_act,3) * pow(((struct vessel*) curr_vessel)->lambda_m - ((struct vessel*) curr_vessel)->lambda_0,2)) *
-    //           ((struct vessel*)curr_vessel)->rhoR_alpha[nts * 1 + sn] / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[1];
-    
     dSdC_act = ((struct vessel*) curr_vessel)->T_act *  (1 - exp(-pow(C, 2))) * (1/lambda_act) *
                ((-1/pow(lambda_act,2))*parab_act + 2*(1/lambda_act)*(((struct vessel*) curr_vessel)->lambda_m - lambda_act)/ pow(((struct vessel*) curr_vessel)->lambda_m - ((struct vessel*) curr_vessel)->lambda_0, 2)) *
                ((struct vessel*)curr_vessel)->rhoR_alpha[nts * 1 + sn] / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[1];
 
-
-    //(pow(lambda_act, -2) / 2 * 
-    //               ((((struct vessel*) curr_vessel)->lambda_m - lambda_act) / 
-    //               pow(((struct vessel*) curr_vessel)->lambda_m - ((struct vessel*) curr_vessel)->lambda_0, 2)) 
-     //              - pow(lambda_act, -3) / 4 * (parab_act)) *
-     //              ((struct vessel*)curr_vessel)->rhoR_alpha[nts * 1 + sn] / ((struct vessel*)curr_vessel)->rho_hat_alpha_h[alpha];;
-
-    //Cbar_act = ((struct vessel*) curr_vessel)->rhoR_alpha[nts * 1 + sn] / J_s / 
-    //            ((struct vessel*) curr_vessel)->rhoR_h * 
-    //            lambda_act * lambda_act * lambda_act * lambda_act * hat_dSdC_act;
-
-
     //Radial stress estimated to be (p_int - p_ext)/2
     lagrange =  0.0; //-(((struct vessel*) curr_vessel)->P)/2.0 - mat_ddot(sigma, mat_mul(mat_mul(R_s,{1.0,0,0,0,0,0,0,0,0}),mat_trans(R_s)));
-
-    //Add in active circumfrential stress
-    //sigma[4] += sigma_act;
 
     int iv[6] = {0,1,2,0,1,2};
     int jv[6] = {0,1,2,1,2,0};
@@ -1752,17 +1561,6 @@ void update_sigma_handshake(void* curr_vessel) {
             sigma[i*3 + j] += sigma_act_mat[i*3 + j];
         }
     }
-
-    //std::cout << "sigma_act: " << sigma_act_mat << std::endl;
-    //std::cout << "dSdC_act: " << dSdC_act << std::endl;
-    //std::cout << "CC_act: " <<std::endl;
-
-    //for(int i = 0; i<6; i++){
-    //    for(int j = 0; j<6; j++){
-    //        std::cout << CC_act_mat[iv[i]][jv[i]][iv[j]][jv[j]] << " ";
-    //    }
-    //    std::cout << std::endl;
-    //}
 
     for(int i = 0; i<3; i++){
         for(int j = 0; j<3; j++){
@@ -1786,66 +1584,10 @@ void update_sigma_handshake(void* curr_vessel) {
             }
         }
     }
-    //std::cout << "CC: " <<std::endl;
-
-    //for(int i = 0; i<6; i++){
-    //    for(int j = 0; j<6; j++){
-    //        std::cout << CC[iv[i]][jv[i]][iv[j]][jv[j]] << " ";
-    //    }
-    //    std::cout << std::endl;
-    //}
-    //((struct vessel*)curr_vessel)->sigma_inv = sigma[0]+sigma[4]+sigma[8];
 
     for(int i = 0; i<9; i++){
         ((struct vessel*)curr_vessel)->sigma[i] = sigma[i];
     }
-
-    //Save updated active radius
-    //((struct vessel*) curr_vessel)->lambda_act[sn] = lambda_act;
-    /*
-    for(int i = 0; i<3; i++){
-        for(int j = 0; j<3; j++){
-            for(int k = 0; k<3; k++){
-                for(int l = 0; l<3; l++){   
-
-                    if (int(CC[j][i][k][l]) != int(CC[i][j][k][l])){
-                        std::cout << "Problem with equivalence 1" << std::endl;   
-                        std::cout << CC[k][l][i][j] << std::endl; 
-                        std::cout << CC[i][j][k][l] << std::endl;   
-                        exit(0);
-                    }
-
-                    if (int(CC[i][j][l][k]) != int(CC[i][j][k][l])){
-                        std::cout << "Problem with equivalence 2" << std::endl;   
-                        std::cout << CC[k][l][i][j] << std::endl; 
-                        std::cout << CC[i][j][k][l] << std::endl;   
-                        exit(0);
-                    }
-
-                    // Major symmetry
-                    //if (int(CC[k][l][i][j]) != int(CC[i][j][k][l])){
-                    //    std::cout << "Problem with equivalence 3" << std::endl; 
-                    //    std::cout << CC[k][l][i][j] << std::endl; 
-                    //    std::cout << CC[i][j][k][l] << std::endl;   
-                    //    exit(0);
-                    //}
-                    
-                }
-            }
-        }
-    }
-    */
-
-
-    /*
-    for(int i = 0; i<6; i++){
-        for(int j = 0; j<6; j++){
-            std::cout << CC[iv[i]][jv[i]][iv[j]][jv[j]] << " ";
-        }
-        std::cout << std::endl;
-    }
-    */
-
 
     for(int i = 0; i<6; i++){
         for(int j = 0; j<6; j++){

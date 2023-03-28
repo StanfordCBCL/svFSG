@@ -51,7 +51,7 @@ Add equation: struct {
    Tolerance: 1e-4
 
    Constitutive model: anisotropic
-   Penalty parameter: 500000000.0
+   Penalty parameter: 750000000.0
    Density: 0.0
    Mass damping: 10000.0
 
@@ -92,17 +92,6 @@ Add equation: struct {
       Time dependence: Spatial
       Spatial values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_inner.vtp
    }
-
-   Add BC: wall_outer {
-      Type: Robin
-      Time dependence: Steady
-      Value: 0.0
-      Stiffness : 1.0e5
-      Damping: 0.0
-      Apply along normal direction: f
-      Reference values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_outer.vtp
-   }
-
  
 }
 

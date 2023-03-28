@@ -62,12 +62,11 @@ class Vessel():
         self.numProcessorsFluid = 24
         self.numProcessorsFluidSolid = 24
         self.zcenter = 0.0
-        self.nq = 10
+        self.nq = 8
         self.iq_eps = 1e-12
         self.mat_W = []
         self.mat_V = []
-        self.displacements_i = []
-        self.displacements_k = []
+        self.mat_D = []
         self.cvessels = []
         self.flipContours = False
         self.flipInlet = False
@@ -75,6 +74,57 @@ class Vessel():
         self.averageVolume = True
         self.solidLinearSolverType = "GMRES"
         self.smoothAttributesValue = 0.0
+
+    def propogateIQNILS(self):
+        self.mat_W = []
+        self.mat_V = []
+        self.mat_D = []
+
+        pointLocatorSolid = vtk.vtkPointLocator()
+        pointLocatorSolid.SetDataSet(self.solidResult)
+        pointLocatorSolid.BuildLocator()
+
+        numPts = self.vesselReference.GetNumberOfPoints()
+        numCells = self.vesselReference.GetNumberOfCells()
+
+        dcurr = []
+        dprev = []
+
+        for q in range(numPts):
+            originalCoordinate = np.array(self.vesselReference.GetPoint(q))
+            displacement_prev = np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(q))
+            currentCoordinate = originalCoordinate + displacement_prev
+
+            pointIdSolid = pointLocatorSolid.FindClosestPoint(currentCoordinate)
+            solidCoordinate = np.array(self.solidResult.GetPoint(pointIdSolid))
+            solidDispacement = np.array(self.solidResult.GetPointData().GetArray("Displacement").GetTuple3(pointIdSolid))
+
+            displacement_curr = solidCoordinate + solidDispacement - originalCoordinate
+            residual_curr = displacement_curr - displacement_prev
+            self.vesselReference.GetPointData().GetArray("residual_curr").SetTuple(q, residual_curr)
+
+            dcurr.append(displacement_curr)
+            dprev.append(displacement_prev)
+
+
+        rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
+        rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
+
+        dcurr = np.array(dcurr).flatten()
+        dprev = np.array(dprev).flatten()
+
+        self.mat_W = []
+        self.mat_V = []
+        self.mat_D = []
+        self.mat_D.append(dcurr)
+        vnew =  dprev + 0.5*rcurr
+        dnew = vnew.reshape((-1,3))
+
+        self.timeIter = 1
+
+
+        return
+
 
     def writeStatus(self, currTime, extra=""):
         with open('svDriverIterations','a') as f:
@@ -521,22 +571,6 @@ class Vessel():
 
         return
 
-
-    def predictSolidResult(self):
-        self.displacements_k = []
-        self.mat_V = []
-        self.mat_W = []
-        if self.timeStep == 1:
-            self.displacements_k += [2.0*self.displacements_i[-1] - self.displacements_i[-2]]
-        if self.timeStep > 1:
-            self.displacements_k += [3.0 * displacements_i[-1] - 3.0 * self.displacements_i[-2] + self.displacements_i[-3]]
-
-        self.point_data.set_array(self.displacements_k[0], 'displacements')
-
-        return
-
-
-
     def appendSolidResult(self):
 
         if self.smoothAttributesValue:
@@ -551,6 +585,9 @@ class Vessel():
 
         time1 = time.time()
 
+        dcurr = []
+        dprev = []
+
         for q in range(numPts):
             originalCoordinate = np.array(self.vesselReference.GetPoint(q))
             displacement_prev = np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(q))
@@ -561,69 +598,93 @@ class Vessel():
             solidDispacement = np.array(self.solidResult.GetPointData().GetArray("Displacement").GetTuple3(pointIdSolid))
 
             displacement_curr = solidCoordinate + solidDispacement - originalCoordinate
-
             residual_curr = displacement_curr - displacement_prev
-
             self.vesselReference.GetPointData().GetArray("residual_curr").SetTuple(q, residual_curr)
 
-        self
+            dcurr.append(displacement_curr)
+            dprev.append(displacement_prev)
+
+
+        rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
+        rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
+
+        dcurr = np.array(dcurr).flatten()
+        dprev = np.array(dprev).flatten()
+
+
 
         if self.predictMethod == "none":
-            self.omega = 1.0
+            dnew = dcurr.reshape((-1, 3))
+
+
         elif self.predictMethod == "aitken":
             if self.timeIter > 1:
-                rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr")).flatten()
-                rprev = np.array(self.vesselReference.GetPointData().GetArray("residual_prev")).flatten()
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
             else:
                 self.omega = 0.5
-            if self.omega > 10:
-                self.omega = 10.0
+            if self.omega > 2.0:
+                self.omega = 2.0
             elif self.omega < 0.1:
                 self.omega = 0.1
+
+            vnew =  dprev + self.omega*rcurr
+            dnew = vnew.reshape((-1,3))
+
+
         elif self.predictMethod == "iqnils":
-            print("TODO: Implement iqnils method")
-            self.omega = 1.0
-            # TODO
-            """
-            # trim to max number of considered vectors
-            self.mat_V = self.mat_V[-self.nq:]
-            self.mat_W = self.mat_W[-self.nq:]
-            # remove linearly dependent vectors
-            while True:
-                # QR decomposition
-                qq, rr = np.linalg.qr(np.array(self.mat_V[:nq]).T)
 
-                # tolerance for redundant vectors
-                i_eps = np.where(
-                    np.abs(np.diag(rr)) < self.iq_eps
-                )[0]
-                if not np.any(i_eps):
-                    break
+            if self.timeIter == 0:
+                self.mat_W = []
+                self.mat_V = []
+                self.mat_D = []
+                self.mat_D.append(dcurr)
+                vnew =  dprev + 0.5*rcurr
+                dnew = vnew.reshape((-1,3))
+            elif self.timeIter == 1:
+                self.mat_D.append(dcurr)
+                vnew =  dprev + 0.5*rcurr
+                dnew = vnew.reshape((-1,3))
+            else:
+                self.mat_D.append(dcurr)
+                self.mat_W.append(self.mat_D[-1] - self.mat_D[-2])
+                self.mat_V.append(rcurr - rprev)
 
-                print("Filtering " + str(len(i_eps)) + " time steps")
-                for i in reversed(i_eps):
-                    self.mat_V.pop(i)
-                    self.mat_W.pop(i)
+                # trim to max number of considered vectors
+                self.mat_V = self.mat_V[-self.nq:]
+                self.mat_W = self.mat_W[-self.nq:]
 
-            # solve for coefficients
-            bb = np.linalg.solve(rr.T, -np.dot(np.array(self.mat_V), self.res[-1]))
-            cc = np.linalg.solve(rr, bb)
+                # remove linearly dependent vectors
+                while True:
+                    # QR decomposition
+                    qq, rr = np.linalg.qr(np.array(self.mat_V[:self.nq]).T)
 
-            # update
-            vec_new = dtk + np.dot(np.array(self.mat_W).T, cc)
-            """
+                    # tolerance for redundant vectors
+                    i_eps = np.where(
+                        np.abs(np.diag(rr)) < self.iq_eps
+                    )[0]
+                    if not np.any(i_eps):
+                        break
+
+                    print("Filtering " + str(len(i_eps)) + " time steps")
+                    for i in reversed(i_eps):
+                        self.mat_V.pop(i)
+                        self.mat_W.pop(i)
+
+                # solve for coefficients
+                bb = np.linalg.solve(rr.T, -np.dot(np.array(self.mat_V), rcurr))
+                cc = np.linalg.solve(rr, bb)
+
+                # update
+                vnew = dcurr + np.dot(np.array(self.mat_W).T, cc)
+                dnew = vnew.reshape((-1, 3))
 
 
         # Calculate cauchy green tensor
         for q in range(numPts):
             rcurr = np.array(self.vesselReference.GetPointData().GetArray("residual_curr").GetTuple3(q))
-            dcurr = np.array(self.vesselReference.GetPointData().GetArray("displacements").GetTuple3(q))
-            displacement = dcurr + self.omega*rcurr
-
             self.vesselReference.GetPointData().GetArray("residual_prev").SetTuple(q, rcurr)
-            self.vesselReference.GetPointData().GetArray("displacements").SetTuple(q, displacement)
+            self.vesselReference.GetPointData().GetArray("displacements").SetTuple(q, dnew[q])
 
         self.vesselReference = computeGaussValues(self.vesselReference,"displacements")
 
@@ -664,6 +725,7 @@ class Vessel():
             self.vesselReference.GetCellData().GetArray("inv_curr").SetTuple1(q, sigma_inv)
 
         return
+
 
     def appendFluidResult(self):
 

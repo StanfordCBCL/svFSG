@@ -93,17 +93,6 @@ Add equation: struct {
       Time dependence: Spatial
       Spatial values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_inner.vtp
    }
-
- 
-   Add BC: wall_outer {
-      Type: Robin
-      Time dependence: Steady
-      Value: 0.0
-      Stiffness : 1.0e5
-      Damping: 0.0
-      Apply along normal direction: f
-      Reference values file path: mesh/solid-mesh-complete/mesh-surfaces/wall_outer.vtp
-   }
    
 }
 
