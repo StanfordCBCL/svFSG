@@ -290,6 +290,7 @@ class Vessel():
 
                 self.cvessels[q*self.nG + p].prefix = self.outputDir
                 self.cvessels[q*self.nG + p].name = 'python_'+str(q)+'_'+str(p)
+                self.cvessels[q*self.nG + p].number = q*self.nG + p
                 self.cvessels[q*self.nG + p].restart = self.timeStep
                 self.cvessels[q*self.nG + p].iteration = self.timeIter
                 self.cvessels[q*self.nG + p].simulate = simulate
@@ -307,9 +308,14 @@ class Vessel():
 
             self.vesselReference.GetCellData().GetArray('defGrad_mem').SetTuple(q,defGrad_mem)
 
-        cvessel_file = open("cvessel_array.dat","wb")
-        pickle.dump(self.cvessels, cvessel_file)
-        cvessel_file.close()
+
+
+        numrank = int(np.loadtxt('numrank'))
+        cvessels_split = np.array_split(self.cvessels,numrank)
+        for i in range(numrank):
+            cvessel_file = open("materialResults/cvessel_array_out_"+str(i)+".dat","wb")
+            pickle.dump(cvessels_split[i], cvessel_file)
+            cvessel_file.close()
 
         print("Running points...")
         time1 = time.time()
@@ -317,10 +323,13 @@ class Vessel():
         time2 = time.time()
         print("Time to run_vessel: " + str(time2 - time1))
 
-        cvessel_file = open("cvessel_array.dat","rb")
-        self.cvessels = pickle.load(cvessel_file)
-        cvessel_file.close()
-
+        for i in range(numrank):
+            cvessel_file = open("materialResults/cvessel_array_in_"+str(i)+".dat","rb")
+            cvessels_temp = pickle.load(cvessel_file)
+            for vess_temp in cvessels_temp:
+                self.cvessels[vess_temp.number] = vess_temp
+            cvessel_file.close()
+        
         print("Parsing points...")
 
         for q in range(numCells):

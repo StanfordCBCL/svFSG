@@ -20,20 +20,9 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size() # new: gives number of ranks in comm
 rank = comm.Get_rank()
 
-
-if rank == 0:
-    cvessel_file = open("cvessel_array.dat","rb")
-    input_array = np.array(pickle.load(cvessel_file))
-    cvessel_file.close()
-    numData = len(input_array)
-
-    split = np.array_split(input_array,size) #Split input array by the number of available cores
-
-else:
-#Create variables on other cores
-    split = None
-
-data = comm.scatter(split,root=0)
+cvessel_file = open("materialResults/cvessel_array_out_"+str(rank)+".dat","rb")
+data = np.array(pickle.load(cvessel_file))
+cvessel_file.close()
 
 for i in range(0,np.shape(data)[0],1):
 
@@ -79,17 +68,7 @@ for i in range(0,np.shape(data)[0],1):
     data[i].out_array = np.array(out_array)
     data[i].savearray = zlib.compress(pickle.dumps(savearray))
 
-comm.Barrier()
+cvessel_file = open("materialResults/cvessel_array_in_"+str(rank)+".dat","wb")
+pickle.dump(data, cvessel_file)
+cvessel_file.close()
 
-output_array = comm.gather(data,root=0)
-
-if rank == 0:
-    cvessel_array = []
-
-    for i in output_array:
-        for j in i:
-            cvessel_array.append(j)
-
-    cvessel_file = open("cvessel_array.dat","wb")
-    pickle.dump(cvessel_array, cvessel_file)
-    cvessel_file.close()
