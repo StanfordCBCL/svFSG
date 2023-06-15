@@ -1,6 +1,7 @@
 from utils import *
 import time
 from cvessel import cvessel
+import sympy
 
 # This class provides functionality to running an FSG simulation
 class Vessel():
@@ -74,6 +75,11 @@ class Vessel():
         self.averageVolume = True
         self.solidLinearSolverType = "GMRES"
         self.smoothAttributesValue = 0.0
+        self.anastomosisGraftRatio = 1.0
+        self.anastomosisConnectionRatio = 1.0
+        self.anastomosisLengthRatio = 0.5
+        self.anastomosisTransitionLength = 0.25
+        self.skippedFluid = False
 
     def propogateIQNILS(self):
         self.mat_W = []
@@ -150,6 +156,7 @@ class Vessel():
         self.runFluid()
         self.updateFluidResults()
         self.appendIterfaceResult()
+        self.skippedFluid = False
         return
 
     def estimateFluidIteration(self):
@@ -161,6 +168,7 @@ class Vessel():
         for q in range(numCells):
             wss_prev = self.vesselReference.GetCellData().GetArray('wss_curr').GetTuple1(q)
             self.vesselReference.GetCellData().GetArray('wss_prev').SetTuple1(q,wss_prev)
+        self.skippedFluid = True
         return
 
     def runFluidSolidIteration(self):
@@ -172,10 +180,10 @@ class Vessel():
         self.updateFluidSolidResults()
         self.appendSolidResult()
         self.appendIterfaceResult()
+        self.skippedFluid = False
         return
 
     def runSolidIteration(self):
-
         self.updateSolid()
         self.saveSolid()
         self.runSolid()
@@ -249,6 +257,9 @@ class Vessel():
         elif self.vesselType == "segmentation":
             self.vesselReference = self.initializeSegmentation()
             self.estimateIterfaceResult()
+        elif self.vesselType == "anastomosis":
+            self.vesselReference = self.initializeAnastomosis()
+            self.estimateIterfaceResult()
         else:
             print("TODO: Implement new initializer")
         self.saveReference()
@@ -319,7 +330,7 @@ class Vessel():
 
         print("Running points...")
         time1 = time.time()
-        os.system("mpiexec python utils_run_vessel.py")
+        os.system("mpiexec python3 utils_run_vessel.py")
         time2 = time.time()
         print("Time to run_vessel: " + str(time2 - time1))
 
@@ -630,8 +641,11 @@ class Vessel():
             if self.timeIter > 1:
                 diff = rcurr - rprev
                 self.omega = -self.omega*np.dot(rprev,diff)/np.dot(diff,diff)
+                #if self.skippedFluid == False:
+                #    self.omega = 0.25
             else:
                 self.omega = 0.5
+
             if self.omega > 2.0:
                 self.omega = 2.0
             elif self.omega < 0.1:
@@ -767,6 +781,8 @@ class Vessel():
 
         array_names = self.vesselReference.array_names
 
+        dv_max = 0
+
         if "temp_array" in array_names:
             self.vesselReference.rename_array("varWallProps","material_global")
             self.vesselReference.rename_array("temp_array","varWallProps")
@@ -812,6 +828,9 @@ class Vessel():
 
                 varWallProps_g = np.hstack((varWallProps_g,np.hstack((stiffness,p_est_g[p],J_final,sigma_gnr_g[p*6:(p+1)*6],p))))
 
+                if np.abs(J_final - 1) > dv_max:
+                    dv_max = np.abs(J_final - 1)
+
             self.vesselReference.GetCellData().GetArray('varWallProps').SetTuple(q,varWallProps_g)
             self.vesselReference.GetCellData().GetArray('p_est').SetTuple(q,p_est_g)
             self.vesselReference.GetCellData().GetArray('sigma_gnr').SetTuple(q,sigma_gnr_g)
@@ -819,6 +838,21 @@ class Vessel():
             self.vesselReference.GetCellData().GetArray('J_curr').SetTuple(q,J_curr)
             self.vesselReference.GetCellData().GetArray('J_c').SetTuple1(q,J_c)
             self.vesselReference.GetCellData().GetArray('p_est_c').SetTuple1(q,p_est_c)
+
+        """
+        print("Editing data...")
+
+        if dv_max > 0.05:
+            print("Scaling dV_max: " + str(dv_max))
+            for q in range(numCells):
+                varWallProp = np.array(self.vesselReference.GetCellData().GetArray('varWallProps').GetTuple(q))
+                for i in range(37,360,45):
+                    varWallProp[i] = 1 + (varWallProp[i]-1)/(dv_max/0.05)
+                self.vesselReference.GetCellData().GetArray('varWallProps').SetTuple(q,varWallProp)
+
+
+        print("Finished editing data...")
+        """
 
         return
 
@@ -1018,6 +1052,301 @@ class Vessel():
         return vol
 
 
+
+    def initializeAnastomosis(self):
+        print("Initializing anastomosis vessel...")
+
+        with open('FolderVesselConfigurationFiles/Native_in_handshake_') as f:
+            lines = f.readlines()[1:]
+            nativeIn = []
+            for line in lines:
+                nativeIn.append([float(x) for x in line.split()])
+
+        self.sigma_h = nativeIn[13][0]
+        self.tau_h = nativeIn[13][1]
+
+        #Build material array (constant for now)
+        materialArray = [ nativeIn[7][0],nativeIn[4][0],nativeIn[4][1],nativeIn[4][2],nativeIn[2][0]*10.0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][2],nativeIn[5][2],nativeIn[2][4]*10.0,nativeIn[2][5],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][3],nativeIn[5][3],nativeIn[2][6]*10.0,nativeIn[2][7],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][4],nativeIn[5][4],nativeIn[2][8]*10.0,nativeIn[2][9],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][5],nativeIn[5][5],nativeIn[2][10]*10.0,nativeIn[2][11],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][1],nativeIn[5][1],nativeIn[2][2]*10.0,nativeIn[2][3],0,0,0,0,0,0,0,0,0,0,\
+                          nativeIn[7][2],nativeIn[16][0],nativeIn[14][2],nativeIn[14][1],0,0,0,0,0,0,0,0,0,0]
+
+        #********************
+
+        points = np.empty([(self.numCirc+1)*(self.numLen+1)*(self.numRad+1),3])
+
+        structureIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        innerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        outerIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        proximalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        distalIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+        sliceIds = np.zeros((self.numCirc+1)*(self.numLen+1)*(self.numRad+1))
+
+        proximalIds[0:(self.numCirc+1)*(self.numRad+1)]=1
+        distalIds[(self.numCirc+1)*(self.numLen)*(self.numRad+1):(self.numCirc+1)*(self.numLen+1)*(self.numRad+1)]=1
+        innerIds[0:(self.numCirc+1)*(self.numLen+1)*(self.numRad+1):(self.numRad+1)]=1
+        outerIds[self.numRad:(self.numCirc+1)*(self.numLen+1)*(self.numRad+1):(self.numRad+1)]=1
+
+        fluidStressQueryIds = np.zeros(self.numCirc*self.numLen*self.numRad)
+        solidStressQueryIds = np.zeros(self.numCirc*self.numLen*self.numRad)
+
+        tevgValue = np.zeros(self.numCirc*self.numLen*self.numRad)
+        aneurysmValue = np.zeros(self.numCirc*self.numLen*self.numRad)
+        simulateIds = np.ones(self.numCirc*self.numLen*self.numRad)
+
+        e_r = np.zeros((self.numCirc*self.numLen*self.numRad,3))
+        e_t = np.zeros((self.numCirc*self.numLen*self.numRad,3))
+        e_z = np.zeros((self.numCirc*self.numLen*self.numRad,3))
+
+        e_ma = np.zeros((self.numCirc*self.numLen*self.numRad,98))
+
+        aFac = 1.5
+        
+        l1 = self.length*(1-self.anastomosisLengthRatio)/2 - self.anastomosisTransitionLength
+        l9 = l1
+
+        l2 = 5*self.anastomosisTransitionLength/12
+        l3 = 1*self.anastomosisTransitionLength/6
+        l4 = 5*self.anastomosisTransitionLength/12
+
+        l5 = self.length*self.anastomosisLengthRatio
+
+        l6 = 5*self.anastomosisTransitionLength/12
+        l7 = 1*self.anastomosisTransitionLength/6
+        l8 = 5*self.anastomosisTransitionLength/12
+
+        wl = self.radius*self.anastomosisConnectionRatio
+        wr = self.radius*self.anastomosisConnectionRatio
+
+        for i in range(self.numLen+1):
+            for j in range(self.numCirc+1):
+                for k in range(self.numRad+1):
+
+                    if self.adaptiveMesh:
+                        if self.length*i/self.numLen - self.length/2.0 == 0:
+                            axi = 0.0
+                        else:
+                            axi = -(1 - 2.0*i/(self.numLen))/abs(1 - 2.0*i/(self.numLen))*self.length*0.5*(np.exp(aFac*abs(1 - 2.0*i/(self.numLen)))-1.0)/(np.exp(aFac)-1.0)
+                    else:
+                        axi = self.length*i/self.numLen - self.length/2.0
+
+                    zs, rs, ths = sympy.symbols('zs rs ths')
+
+                    # ***
+                    if axi < -self.length/ 2 + l1:
+                        r_inner = self.radius 
+                        fp = rs
+
+                    elif axi < -self.length/ 2 + l1 + l2:
+                        r_inner = 0.5 * (self.radius - 0.5 * wl*2.0) *    np.sin((np.pi * (axi - (0.5*(l2 + l3)))) / l2) + 0.5 * (self.radius + 0.5 * wl*2.0)
+                        fp = rs - 0.5 * (self.radius - 0.5 * wl*2.0) * sympy.sin((np.pi * (zs  - (0.5*(l2 + l3)))) / l2) + 0.5 * (self.radius + 0.5 * wl*2.0)
+
+                    elif axi < -self.length/ 2 + l1 + l2 + l3:
+                        r_inner = wl
+                        fp = rs
+
+                    elif axi < -self.length/ 2 + l1 + l2 + l3 + l4:
+                        r_inner = 0.5 * (self.radius*self.anastomosisGraftRatio - 0.5 * wl*2.0) *    np.sin((np.pi * ( axi + (0.5*(l4 + l5)))) / l4) + 0.5 * (self.radius*self.anastomosisGraftRatio + 0.5 * wl*2.0)
+                        fp = rs - 0.5 * (self.radius*self.anastomosisGraftRatio - 0.5 * wl*2.0) * sympy.sin((np.pi * (zs + (0.5 * (l4 + l5)))) / l4) + 0.5 * (self.radius*self.anastomosisGraftRatio + 0.5 * wl*2.0)
+
+                    elif axi < -self.length/ 2 + l1 + l2 + l3 + l4 + l5:
+                        r_inner = self.radius*self.anastomosisGraftRatio
+                        fp = rs
+
+                    elif axi < -self.length/ 2 + l1 + l2 + l3 + l4 + l5 + l6:
+                        r_inner = 0.5 * (self.radius*self.anastomosisGraftRatio - 0.5 * wr*2.0) * np.sin((np.pi * -(axi - 0.5 * (l5 + l6))) / l6) + 0.5 * (self.radius*self.anastomosisGraftRatio + 0.5 * wr*2.0)
+                        fp = rs - 0.5 * (self.radius*self.anastomosisGraftRatio - 0.5 * wr*2.0) * sympy.sin((np.pi * -(zs - 0.5 * (l5 + l6))) / l6) + 0.5 * (self.radius*self.anastomosisGraftRatio + 0.5 * wr*2.0)
+
+                    elif axi < -self.length/ 2 + l1 + l2 + l3 + l4 + l5 + l6 + l7:
+                        r_inner = wr
+                        fp = rs
+
+                    elif axi < -self.length/ 2 + l1 + l2 + l3 + l4 + l5 + l6 + l7 + l8:
+                        r_inner = 0.5 * (self.radius  - 0.5 * wr*2.0) * np.sin(   (np.pi * -(axi + 0.5 * (l7 + l8))) / l8) + 0.5 * (self.radius + 0.5 * wr*2.0)
+                        fp = rs - 0.5 * (self.radius  - 0.5 * wr*2.0) * sympy.sin((np.pi * -(zs  + 0.5 * (l7 + l8))) / l8) + 0.5 * (self.radius + 0.5 * wr*2.0)
+
+                    else:
+                        r_inner = self.radius 
+                        fp = rs
+
+
+                    dfdz = sympy.diff(fp, zs)
+                    dfdr = sympy.diff(fp, rs)
+
+                    # cylindrical coordinate system
+                    cir = 2.0*j*np.pi/self.numCirc
+                    radial_coord = float(dfdr.subs([(rs, self.radius), (zs, axi)]))
+                    # angular_coord = cir
+                    z_coord = float(dfdz.subs([(rs, self.radius), (zs, axi)]))
+                    mag = np.sqrt(radial_coord**2 + z_coord**2)
+                    # vector_norm = (1/mag)*[radial_coord, angular_coord, z_coord]
+                    # import pdb; pdb.set_trace()
+                    rad = (
+                        r_inner + self.thickness * k / self.numRad * mag/sympy.cos(sympy.atan(z_coord/radial_coord))
+                    )
+                    # print(mag/sympy.cos(sympy.atan(z_coord/radial_coord)))
+                    # NOTE: can change axi here and around line 254 to shift coordinate system along z-axis
+
+                    rad_normal = np.array([radial_coord * np.cos(cir), radial_coord * np.sin(cir), z_coord])
+                    rad_normal = rad_normal/np.linalg.norm(rad_normal)
+
+
+                    points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = rad_normal*self.thickness*k/self.numRad + np.array([r_inner * np.cos(cir), r_inner * np.sin(cir), axi])
+
+                    structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
+                    sliceIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] =  i
+
+
+        coords=[[0, 1, 0],
+                [0, 1, 1],
+                [1, 1, 1],
+                [1, 1, 0],
+                [0, 0, 0],
+                [0, 0, 1],
+                [1, 0, 1],
+                [1, 0, 0]]
+
+
+        for i in range(self.numLen):
+            for j in range(self.numCirc):
+                for k in range(self.numRad):
+
+                    cellPts = []
+
+                    for coord in coords:
+                        cellPts.append(points[(i+coord[0])*(self.numCirc+1)*(self.numRad+1) + (j+coord[1])*(self.numRad+1) + (k+coord[2]),:])
+
+                    cellPts = np.array(cellPts)
+
+                    cellCenter = np.mean(cellPts,axis=0)
+
+                    xPt = cellCenter[0]
+                    yPt = cellCenter[1]
+                    zPt = cellCenter[2]
+
+                    v_r = np.mean(cellPts[[1,2,5,6]],axis=0) - np.mean(cellPts[[0,3,4,7]],axis=0)
+                    v_r = v_r/np.linalg.norm(v_r)
+                    v_t = np.mean(cellPts[[4,5,6,7]],axis=0) - np.mean(cellPts[[0,1,2,3]],axis=0)
+                    v_t = v_t/np.linalg.norm(v_t)
+                    v_z = np.mean(cellPts[[2,3,6,7]],axis=0) - np.mean(cellPts[[0,1,4,5]],axis=0)
+                    v_z = v_z/np.linalg.norm(v_z)
+
+                    v_r = np.cross(v_z,v_t)
+                    v_r = v_r/np.linalg.norm(v_r)
+                    #v_t = np.cross(v_z,v_r)
+                    #v_t = v_t/np.linalg.norm(v_t)
+                    v_z = np.cross(v_t,v_r)
+                    v_z = v_z/np.linalg.norm(v_z)
+
+                    e_r[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_r
+                    e_t[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_t
+                    e_z[i*self.numCirc*self.numRad + j*self.numRad + k,:] = v_z
+
+                    A = np.array([v_r,v_t,v_z])
+                    # Is this a rotation matrix?
+                    if np.sometrue(np.abs(np.dot(np.array(A), np.transpose(np.array(A))) - 
+                                          np.eye(3, dtype=float)) > 1e-6):
+                        print(A)
+                        raise RuntimeError('Matrix *A* does not describe a rotation.')
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,:] = materialArray
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,5:8]   = v_r
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,8:11]  = v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,11:14] = v_z
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,18:21] =  np.cos(90.0*np.pi/180.0)*v_z + np.sin(90.0*np.pi/180.0)*v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,32:35] =  np.cos(0.0*np.pi/180.0)*v_z + np.sin(0.0*np.pi/180.0)*v_t
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,46:49] =  np.cos(41.94*np.pi/180.0)*v_z + np.sin(41.94*np.pi/180.0)*v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,60:63] =  np.cos(318.06*np.pi/180.0)*v_z + np.sin(318.06*np.pi/180.0)*v_t
+
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,74:77] =  np.cos(90.0*np.pi/180.0)*v_z + np.sin(90.0*np.pi/180.0)*v_t
+                    e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,88:91] =  np.cos(90.0*np.pi/180.0)*v_z + np.sin(90.0*np.pi/180.0)*v_t
+
+                    fluidStressQueryIds[k + j*self.numRad + i*self.numRad*self.numCirc] = j*self.numRad + i*self.numRad*self.numCirc
+                    solidStressQueryIds[k + j*self.numRad + i*self.numRad*self.numCirc] = j*self.numRad + i*self.numRad*self.numCirc + self.numRad
+
+                    if self.tevg:
+                        tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getTEVGValue([xPt,yPt,zPt],self.length*self.anastomosisLengthRatio/2.0+self.anastomosisTransitionLength/2.0, self.zcenter)
+                        if tevgValue[k + j*self.numRad + i*self.numRad*self.numCirc] > 0:
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,4] = 200000000
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,1] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,2] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,3] = 1
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,14] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,28] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,42] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,56] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,70] = 0
+                            e_ma[k + j*self.numRad + i*self.numRad*self.numCirc,84] = 0
+                    if self.aneurysm:
+                        aneurysmValue[k + j*self.numRad + i*self.numRad*self.numCirc] = getAneurysmValue([xPt,yPt,zPt], self.radius)
+
+
+        vol = pv.StructuredGrid()
+        vol.points = points
+        vol.dimensions = [self.numRad+1, self.numCirc+1, self.numLen+1]
+
+        numCells = vol.GetNumberOfCells()
+        vol.GetPointData().AddArray(pv.convert_array((proximalIds).astype(int),name="ProximalRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((distalIds).astype(int),name="DistalRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((innerIds).astype(int),name="InnerRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((outerIds).astype(int),name="OuterRegionID"))
+        vol.GetPointData().AddArray(pv.convert_array((structureIds).astype(int),name="StructureID"))
+        vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="GlobalElementID"))
+        vol.GetCellData().AddArray(pv.convert_array(np.linspace(1,numCells,numCells).astype(int),name="CellStructureID"))
+        vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="varWallProps"))
+        vol.GetPointData().AddArray(pv.convert_array((sliceIds).astype(int),name="sliceIds"))
+
+        #Exchange these to gauss point quantities
+        #Matrices/arrays
+        vol.GetCellData().AddArray(pv.convert_array(np.zeros((self.numCirc*self.numLen*self.numRad,45*8)).astype(float),name="temp_array"))
+
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.array([1,0,0,0,1,0,0,0,1]),8),(numCells,1)).astype(float),name="defGrad"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.array([1,0,0,0,1,0,0,0,1]),8),(numCells,1)).astype(float),name="defGrad_mem"))
+
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(36),8),(numCells,1)).astype(float),name="stiffness_mem"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(9),8),(numCells,1)).astype(float),name="sigma_mem"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile(np.zeros(6),8),(numCells,1)).astype(float),name="sigma_gnr"))
+        #Scalar values
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_curr"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([1],8),(numCells,1)).astype(float),name="J_target"))
+        vol.GetCellData().AddArray(pv.convert_array(np.tile(np.tile([0],8),(numCells,1)).astype(float),name="p_est"))
+
+        vol.GetCellData().AddArray(pv.convert_array(np.ones(numCells).astype(float),name="J_c"))
+        vol.GetCellData().AddArray(pv.convert_array(np.zeros(numCells).astype(float),name="p_est_c"))
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numCells).astype(float),name="wss_curr"))
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numCells).astype(float),name="wss_prev"))
+
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_curr"))
+        vol.GetCellData().AddArray(pv.convert_array(nativeIn[13][0]*np.ones(numCells).astype(float),name="inv_prev"))
+
+
+        vol.GetCellData().AddArray(pv.convert_array(e_r.astype(float),name="e_r"))
+        vol.GetCellData().AddArray(pv.convert_array(e_t.astype(float),name="e_t"))
+        vol.GetCellData().AddArray(pv.convert_array(e_z.astype(float),name="e_z"))
+        vol.GetCellData().AddArray(pv.convert_array(e_ma.astype(float),name="material_global"))
+        vol.GetCellData().AddArray(pv.convert_array(fluidStressQueryIds.astype(int),name="fluidStressQueryID"))
+        vol.GetCellData().AddArray(pv.convert_array(solidStressQueryIds.astype(int),name="solidStressQueryID"))
+        vol.GetCellData().AddArray(pv.convert_array(simulateIds.astype(int),name="Simulate"))
+        vol.GetCellData().AddArray(pv.convert_array(aneurysmValue.astype(float),name="aneurysmValue"))
+        vol.GetCellData().AddArray(pv.convert_array(tevgValue.astype(float),name="tevgValue"))
+        vol = vol.cast_to_unstructured_grid()
+        vol = clean(vol, tolerance=1e-10)
+        numPts = vol.GetNumberOfPoints()
+        vol.GetPointData().AddArray(pv.convert_array(np.linspace(1,numPts,numPts).astype(int),name="GlobalNodeID"))
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="displacements"))
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_curr"))
+        vol.GetPointData().AddArray(pv.convert_array(np.tile(np.zeros(3),(numPts,1)).astype(float),name="residual_prev"))
+        vol.GetPointData().AddArray(pv.convert_array(np.zeros(numPts).astype(float),name="Pressure"))
+        vol.GetPointData().AddArray(pv.convert_array(nativeIn[13][1]*np.ones(numPts).astype(float),name="WSS"))
+        vol.GetPointData().AddArray(pv.convert_array(vol.points.astype(float),name="Coordinate"))
+
+        return vol
     def initializeSegmentation(self):
         """
         Initialize points and coordinate system for segmentation
@@ -1028,11 +1357,35 @@ class Vessel():
         ctgrPtsInner = parseCTGR(self.segmentationName+'_inner.ctgr')
         numSegsInner = np.shape(ctgrPtsInner)[0]
 
+        for i in range(np.shape(ctgrPtsInner)[0]):
+            for j in range(np.shape(ctgrPtsInner)[1]):
+                    ctgrPtsInner[i,j] = np.matmul(self.rotation_matrix,ctgrPtsInner[i,j])
+
+        center5 = np.array(np.mean(ctgrPtsInner[6],axis=0))
+        center10 = np.mean(ctgrPtsInner[10],axis=0)
+        zDiff = center10[2] - center5[2]
+        numPtInner = np.shape(ctgrPtsInner)[1]
+        for i in range(6,12):
+            center = np.copy(center5)
+            center[2] = center5[2] + (i-6.0)*1.35/6.0
+            for j in range(np.shape(ctgrPtsInner)[1]):
+                xPt = 0.8573*np.cos(2.0*j*np.pi/numPtInner)
+                yPt = 0.8573*np.sin(2.0*j*np.pi/numPtInner)
+                ctgrPtsInner[i,j] = center + [xPt,yPt,0]
+
+
+
         if not self.estimateOuterSegmentation:
             ctgrPtsOuter = parseCTGR(self.segmentationName+'_outer.ctgr')
             numSegsOuter = np.shape(ctgrPtsOuter)[0]
             if numSegsInner != numSegsOuter:
                 raise RuntimeError('Number of inner segmenetations does not equal number of outer segmentations!')
+
+            for i in range(np.shape(ctgrPtsOuter)[0]):
+                for j in range(np.shape(ctgrPtsOuter)[1]):
+                        ctgrPtsOuter[i,j] = np.matmul(self.rotation_matrix,ctgrPtsOuter[i,j])
+
+
 
         self.numLen = int(np.max([1,round((self.numLen) / (numSegsInner-1))]) * (numSegsInner-1))
 
@@ -1047,7 +1400,6 @@ class Vessel():
             #Align outer data to inner data
             for i in range(np.shape(ctgrPtsInner)[0]):
                 ctgrPtsOuter[i] = alignContours(ctgrPtsInner[i],ctgrPtsOuter[i])
-
 
         # Now reparameterize to desired number of points
         ctgrPtsInner = interpolateSplineArray(ctgrPtsInner,periodic=True,numPts=self.numCirc)
@@ -1127,7 +1479,14 @@ class Vessel():
                         zPt = (k/self.numRad)*(ctgrPtsOuter[i,j%self.numCirc,2] - ctgrPtsInner[i,j%self.numCirc,2]) + ctgrPtsInner[i,j%self.numCirc,2]
                     else:
                         p_radius = np.linalg.norm(ctgrPtsInner[i,j%self.numCirc,:] - center)
-                        p_v_r = (ctgrPtsInner[i,j%self.numCirc,:] - center)/p_radius
+                        if i == 0 or i == self.numLen:
+                            p_v_r = (ctgrPtsInner[i,j%self.numCirc,:] - center)/p_radius
+                        else:
+                            p_v_t = ctgrPtsInner[i,(j+1)%self.numCirc,:] - ctgrPtsInner[i,j%self.numCirc - 1,:]
+                            p_v_z = ctgrPtsInner[i + 1,j%self.numCirc,:] - ctgrPtsInner[i - 1,j%self.numCirc,:]
+                            p_v_r = np.cross(p_v_t, p_v_z)
+                            p_v_r = p_v_r/np.linalg.norm(p_v_r)
+
                         if self.constantThickness:
                             p_thickness = self.thickness
                         else:
@@ -1136,8 +1495,7 @@ class Vessel():
                         yPt = (k/self.numRad)*(p_thickness*p_v_r[1]) + ctgrPtsInner[i,j%self.numCirc,1]
                         zPt = (k/self.numRad)*(p_thickness*p_v_r[2]) + ctgrPtsInner[i,j%self.numCirc,2]
                     structureIds[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k] = i*(self.numCirc)*(self.numRad+1) + (j%self.numCirc)*(self.numRad+1) + k + 1
-                    pointCoordinate = np.matmul(self.rotation_matrix, np.array([xPt, yPt, zPt]))
-                    points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] = pointCoordinate
+                    points[i*(self.numCirc+1)*(self.numRad+1) + j*(self.numRad+1) + k,:] =  np.array([xPt, yPt, zPt])
 
 
         coords=[[0, 1, 0],
@@ -1286,6 +1644,7 @@ class Vessel():
         vol.GetPointData().AddArray(pv.convert_array(vol.points.astype(float),name="Coordinate"))
 
         return vol
+
 
 
     def generateFluidMesh(self, surf):
@@ -1472,13 +1831,13 @@ class Vessel():
             data = file.readlines()
         data[54] = "   Penalty parameter: " + str(self.penalty) + "\n"
         data[56] = "   Mass damping: " + str(self.damping) + "\n"
-        data[58] = "   LS type: " + str(self.solidLinearSolverType) + " {\n"
-        if self.solidLinearSolverType == "GMRES":
-            data[60] = "      Max iterations: 10\n"
-            data[61] = "      Krylov space dimension: 50\n"
-        else:
-            data[60] = "      Max iterations: 1000\n"
-            data[61] = "      Krylov space dimension: 250\n"
+        #data[58] = "   LS type: " + str(self.solidLinearSolverType) + " {\n"
+        # if self.solidLinearSolverType == "GMRES":
+        #     data[60] = "      Max iterations: 10\n"
+        #     data[61] = "      Krylov space dimension: 50\n"
+        # else:
+        #     data[60] = "      Max iterations: 1000\n"
+        #     data[61] = "      Krylov space dimension: 250\n"
         with open(self.simulationInputDirectory + '/solid_mm.mfs', 'w') as file:
             file.writelines(data)
 
