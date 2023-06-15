@@ -13,6 +13,7 @@ def loadVessel():
         vess = pickle.load(file)
     return vess
 
+os.system("mpiexec python3 utils_init_vessel.py")
 startTime = time.time()
 
 if os.path.exists('vessel.pickle'):

@@ -13,6 +13,9 @@ def loadVessel():
         vess = pickle.load(file)
     return vess
 
+os.system("mpiexec python3 utils_init_vessel.py")
+startTime = time.time()
+
 if os.path.exists('vessel.pickle'):
     simulation_vessel = loadVessel()
     simulation_vessel.startTime = simulation_vessel.currTime
@@ -30,8 +33,6 @@ else:
     os.system('mkdir -p ' + 'meshResults')
     os.system('mkdir -p ' + 'simulationResults')
     simulation_vessel.initializeVessel()
-
-startTime = time.time()
 
 while simulation_vessel.timeStep < simulation_vessel.total_time_steps:
     while simulation_vessel.residual > simulation_vessel.tolerance or simulation_vessel.timeIter < 3:
