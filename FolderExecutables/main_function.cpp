@@ -93,11 +93,8 @@ const char* run(char* loadstring_char, char* prefix_char, char* name_char, int r
     }
     if(anysm_arg > 0.0) {
         //Change endothelial functioning to be proportional to damage
-        for (int alpha = 0; alpha < simulation_vessel.n_alpha; alpha++) {
-            simulation_vessel.K_tauw_p_alpha_h[alpha] = std::max(simulation_vessel.K_tauw_p_alpha_h[alpha] - anysm_arg, 0.0);
-        }
-        
-        simulation_vessel.c_alpha_h[0] = simulation_vessel.c_alpha_h[0]*(1.0 - anysm_arg);
+        simulation_vessel.K_delta_sigma = 0.0184*anysm_arg;
+        simulation_vessel.c_alpha_h[0] = simulation_vessel.c_alpha_h[0]*(1.0 - 0.0595*anysm_arg);
     }
 
     //If restarting file, load previous vessel

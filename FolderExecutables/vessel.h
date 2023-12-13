@@ -133,6 +133,10 @@ public:
     double K_tauw_p_e_h, K_tauw_p_m_h, K_tauw_p_ct_h, K_tauw_p_cz_h, K_tauw_p_cd1_h, K_tauw_p_cd2_h;
     //Wall Shear Stress mediated degradation
     double K_tauw_d_e_h, K_tauw_d_m_h, K_tauw_d_ct_h, K_tauw_d_cz_h, K_tauw_d_cd1_h, K_tauw_d_cd2_h;
+    //Stress mechanosensing parameter
+    double K_delta_sigma = 0;
+    //Wall Shear Stress mechanosensing parameter
+    double K_delta_tauw = 0;
     //Other
     //double rhoR_0 = 0.0;
     //double eta = 0;

@@ -82,7 +82,7 @@ def save_data(file_name, data):
     # Write the data.
     writer.Write()
 
-def thresholdModel(data,dataName,low,high,extract=True,cell=False):
+def thresholdModel(data,dataName,low,high,extract=True,cell=False, allScalars=True):
     if cell:
         data.GetCellData().SetActiveScalars(dataName)
     else:
@@ -91,6 +91,8 @@ def thresholdModel(data,dataName,low,high,extract=True,cell=False):
     t.SetInputData(data)
     t.SetLowerThreshold(low)
     t.SetUpperThreshold(high)
+    if not allScalars:
+        t.AllScalarsOff()
     if cell:
         t.SetInputArrayToProcess(0,0,0,vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS, vtk.vtkDataSetAttributes.SCALARS)
     else:
@@ -103,6 +105,16 @@ def thresholdModel(data,dataName,low,high,extract=True,cell=False):
         return pv.wrap(t_surf.GetOutput())
     else:
         return pv.wrap(t.GetOutput())
+
+def thresholdPoints(polydata, dataName, low):
+
+    threshold = vtk.vtkThresholdPoints()
+    threshold.SetInputData(polydata)
+    threshold.ThresholdByUpper(low)
+    threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, dataName)
+    threshold.Update()
+
+    return pv.wrap(threshold.GetOutput())
 
 def parsePoint(output_HnS):
 
@@ -187,12 +199,24 @@ def clean(data, tolerance=None):
     return output
 
 
-def getAneurysmValue(point,radius):
+def getAneurysmValue(z, zod, zapex, theta, thetaod, thetaapex):
     """                                                                                                                                                                                                      
     Get the value of vessel behavior based on point location and radius                                                                                                                                      
     """
-    zPt = point[2]
-    vesselValue = 0.65*np.exp(-abs(zPt/(radius*4.0))**2)
+
+    vend = 1
+    vapex = 10
+    vz = 2
+    vtheta = 2
+
+    vesselValue = (
+        vend
+        + (vapex - vend) * np.exp(-np.abs((z - zapex) / zod) ** vz)
+        * np.exp(-np.abs((theta - thetaapex) / thetaod) ** vtheta)
+    )
+
+    #zPt = point[2]
+    #vesselValue = 0.65*np.exp(-abs(zPt/(radius*4.0))**2)
     return vesselValue
 
 
@@ -481,7 +505,7 @@ def interpolateSolution(source, target):
 
 
 
-def parseCTGR(filename):
+def parseCTGR(filename, addFinal = False):
     """
     Read SimVascular segmentation file and return points
     """
@@ -500,6 +524,11 @@ def parseCTGR(filename):
                     dataLine = re.findall('"([^"]*)"', line)
                     dataLine = [float(x) for x in dataLine]
                     dataGroup.append(dataLine[1:])
+
+    if addFinal:
+        dataGroup = np.loadtxt('final_segmentation.txt')
+        dataGroup = interpolateSpline(dataGroup,periodic=True,numPts=1000)
+        data.append(dataGroup)
 
     return np.array(data)
 

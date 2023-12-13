@@ -790,9 +790,9 @@ void update_kinetics(vessel& curr_vessel) {
 
     //Differences in current mechanical state from the reference state
     //Stress invariant
-    double delta_sigma = (curr_vessel.sigma_inv / curr_vessel.sigma_inv_h) - 1;
+    double delta_sigma = ((1 - curr_vessel.K_delta_sigma) * curr_vessel.sigma_inv / curr_vessel.sigma_inv_h) - 1;
     //Wall shear stress
-    double delta_tauw = (curr_vessel.bar_tauw / curr_vessel.bar_tauw_h) - 1;
+    double delta_tauw = ((1 - curr_vessel.K_delta_tauw) * curr_vessel.bar_tauw / curr_vessel.bar_tauw_h) - 1;
 
     //Initialize pars for looping later
     double K_sigma_p = 0, K_tauw_p = 0, K_sigma_d = 0, K_tauw_d = 0;
